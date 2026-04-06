@@ -153,6 +153,11 @@ class AES67Engine(Module, AutoCSR):
         self.rx_delay_ns        = CSRStorage(32, reset=0)
         self.filter_shift       = CSRStorage(4,  reset=4)  # ~16-sample TC
 
+        # PTP role: 0 = slave (default), 1 = master. Set by BMC firmware.
+        self.mode_is_master       = CSRStorage(1,  reset=0)
+        # Master Sync interval in clk125 cycles. 15.625e6 cycles = 125 ms.
+        self.sync_interval_cycles = CSRStorage(32, reset=15_625_000)
+
         self.tx_ssrc            = CSRStorage(32, reset=0xDEADBEEF)
         self.rx_expected_ssrc   = CSRStorage(32, reset=0)
         self.payload_type       = CSRStorage(7,  reset=98)
@@ -202,7 +207,7 @@ class AES67Engine(Module, AutoCSR):
         self.tx_length   = CSRStorage(16)
         self.irq_status  = CSRStatus()
 
-        # ---- Virtual I2S CSRs ----
+        # ---- Virtual TDM-16 CSRs ----
         self.virtaud_tx_data    = CSRStorage(32)
         self.virtaud_tx_ch      = CSRStorage(4)
         self.virtaud_tx_wr      = CSR()
@@ -212,7 +217,7 @@ class AES67Engine(Module, AutoCSR):
         self.virtaud_rx_rd      = CSR()
         self.virtaud_rx_empty   = CSRStatus()
         self.virtaud_mix_enable = CSRStorage()
-        self.virtaud_chan_mask  = CSRStorage(8)
+        self.virtaud_chan_mask  = CSRStorage(16)
 
         # ---- Add Verilog sources ----
         rtl_dir = os.path.join(os.path.dirname(__file__), "..", "rtl")
@@ -273,6 +278,8 @@ class AES67Engine(Module, AutoCSR):
             i_cfg_tx_delay_ns        = self.tx_delay_ns.storage,
             i_cfg_rx_delay_ns        = self.rx_delay_ns.storage,
             i_cfg_filter_shift       = self.filter_shift.storage,
+            i_cfg_mode_is_master     = self.mode_is_master.storage,
+            i_cfg_sync_interval_cycles = self.sync_interval_cycles.storage,
 
             # Status
             o_stat_ptp_sec             = self.ptp_sec.status,

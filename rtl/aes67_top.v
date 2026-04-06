@@ -73,6 +73,8 @@ module aes67_top (
     input  wire signed [31:0] cfg_tx_delay_ns,    // PHY/cable TX asymmetry
     input  wire signed [31:0] cfg_rx_delay_ns,    // PHY/cable RX asymmetry
     input  wire [3:0]  cfg_filter_shift,          // PTP offset LP filter pole
+    input  wire        cfg_mode_is_master,        // BMC: master vs slave
+    input  wire [31:0] cfg_sync_interval_cycles,  // master Sync TX interval
 
     // Status outputs
     output wire [47:0] stat_ptp_sec,
@@ -111,7 +113,7 @@ module aes67_top (
     output wire [3:0]  virtaud_rx_ch,
     output wire        virtaud_rx_empty,
     input  wire        virtaud_mix_enable,
-    input  wire [7:0]  virtaud_channel_mask
+    input  wire [15:0] virtaud_channel_mask
 );
 
     // ---- Clock generation ----
@@ -186,6 +188,8 @@ module aes67_top (
         .tx_delay_ns            (cfg_tx_delay_ns),
         .rx_delay_ns            (cfg_rx_delay_ns),
         .filter_shift           (cfg_filter_shift),
+        .mode_is_master         (cfg_mode_is_master),
+        .sync_interval_cycles   (cfg_sync_interval_cycles),
         .rx_axis_tdata          (ptp_rx_tdata),
         .rx_axis_tvalid         (ptp_rx_tvalid),
         .rx_axis_tlast          (ptp_rx_tlast),
@@ -309,10 +313,10 @@ module aes67_top (
     assign i2s_mclk = mclk_int;
 
     // ---- Virtual I2S (CPU mix-in) ----
-    virt_i2s #(
-        .NUM_CHANNELS(8),
+    virt_tdm16 #(
+        .NUM_CHANNELS(16),
         .FIFO_ADDR_W (8)
-    ) u_virt_i2s (
+    ) u_virt_tdm16 (
         .clk              (clk125),
         .rst              (rst),
         .cpu_tx_wr        (virtaud_tx_wr),

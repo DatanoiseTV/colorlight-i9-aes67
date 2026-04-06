@@ -44,7 +44,7 @@ RTL_SRCS  = \
     rtl/rtp/rtp_engine.v \
     rtl/audio/audio_clk_gen.v \
     rtl/audio/i2s_tdm_master.v \
-    rtl/audio/virt_i2s.v \
+    rtl/audio/virt_tdm16.v \
     rtl/soc/cpu_netif.v \
     rtl/soc/packet_router.v \
     rtl/pll_25_to_125.v \

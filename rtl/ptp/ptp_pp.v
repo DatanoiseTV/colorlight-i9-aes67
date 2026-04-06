@@ -1,46 +1,42 @@
 // SPDX-License-Identifier: MIT
 // PTP Packet Processor (IEEE 1588-2008)
 //
-// Implements the slave-side delay-request-response mechanism end-to-end
-// in hardware:
+// Implements BOTH the master and slave sides of the
+// delay-request-response mechanism end-to-end in hardware. The mode
+// is selected by `mode_is_master` (typically driven by the BMC running
+// in the CPU firmware).
 //
-//    Master                          Slave
-//      |--- Sync (t1) ---------------->|  capture t2 (RX SFD timestamp)
-//      |--- Follow_Up (carries t1) --->|  store t1, correctionField_S
-//      |<-- Delay_Req --(t3)-----------|  capture t3 (TX SFD timestamp)
-//      |--- Delay_Resp (carries t4) -->|  store t4, correctionField_R
+// SLAVE side (mode_is_master = 0):
 //
-// Per RFC 1588-2008 §11.3, the offset and mean path delay are:
+//    Master                          Us (slave)
+//      |--- Sync (t1) ---------------->|  capture t2 = RX SFD ts
+//      |--- Follow_Up (t1) ----------->|  store t1, sum corrField
+//      |<-- Delay_Req --(t3)-----------|  capture t3 = TX SFD ts
+//      |--- Delay_Resp (t4) ---------->|  store t4
 //
-//   offset = ((t2 - t1 - corrField_S) - (t4 - t3 - corrField_R)) / 2
-//   delay  = ((t2 - t1 - corrField_S) + (t4 - t3 - corrField_R)) / 2
+//    offset = ((t2 - t1 - cf_sync) - (t4 - t3 - cf_resp)) / 2
+//    delay  = ((t2 - t1 - cf_sync) + (t4 - t3 - cf_resp)) / 2
 //
-// where corrField_S is the Sync correctionField (from Follow_Up if
-// twoStepFlag is set, else from the Sync itself) and corrField_R is the
-// Delay_Resp correctionField. The correctionField is in units of
-// (nanoseconds × 2^16) and is added by transparent clocks along the path.
+// MASTER side (mode_is_master = 1):
 //
-// PTP message format (PTPv2):
-//   Octet 0:    transportSpecific[7:4] | messageType[3:0]
-//   Octet 1:    reserved[7:4] | versionPTP[3:0]
-//   Octet 2-3:  messageLength
-//   Octet 4:    domainNumber
-//   Octet 5:    reserved
-//   Octet 6:    flagField hi (twoStepFlag = bit 1 of low nibble = 0x02)
-//   Octet 7:    flagField lo
-//   Octet 8-15: correctionField (signed 64-bit, ns << 16)
-//   Octet 16-19: reserved
-//   Octet 20-29: sourcePortIdentity
-//   Octet 30-31: sequenceId
-//   Octet 32:   controlField
-//   Octet 33:   logMessageInterval
-//   Octet 34-43: originTimestamp (6-byte sec, 4-byte nsec)
+//    Us (master)                     Slave
+//      |--- Sync ----(t1)------------>|  we capture our own t1 = TX SFD ts
+//      |--- Follow_Up (carrying t1) ->|
+//      |<-- Delay_Req ---(t3)---------|  we capture t4 = our RX SFD ts
+//      |--- Delay_Resp (t4) ---------->|  echo back the slave's source ID
 //
-// This processor sees only the UDP payload (router strips Eth/IP/UDP).
+// Sync is sent periodically (every sync_interval cycles, default ~125 ms).
+//
+// The BMC algorithm and Announce-message handling run in the firmware
+// over a forked PTP path through the packet router.
 
 module ptp_pp (
     input  wire        clk,
     input  wire        rst,
+
+    // Mode and timing
+    input  wire        mode_is_master,
+    input  wire [31:0] sync_interval_cycles,    // sync TX period in clk cycles
 
     // PTP UDP payload from packet router
     input  wire [7:0]  rx_axis_tdata,
@@ -48,30 +44,29 @@ module ptp_pp (
     input  wire        rx_axis_tlast,
     output wire        rx_axis_tready,
 
-    // RX timestamp FIFO (sec/nsec, popped per Sync)
+    // RX timestamp FIFO (popped per Sync in slave mode, per Delay_Req in master mode)
     input  wire [47:0] rx_ts_sec,
     input  wire [31:0] rx_ts_nsec,
     input  wire        rx_ts_valid,
     output reg         rx_ts_consume,
 
-    // TX timestamp FIFO (popped per Delay_Req)
+    // TX timestamp FIFO (popped per Delay_Req in slave mode, per Sync in master mode)
     input  wire [47:0] tx_ts_sec,
     input  wire [31:0] tx_ts_nsec,
     input  wire        tx_ts_valid,
     output reg         tx_ts_consume,
 
-    // PTP UDP payload to TX wrapper (Delay_Req)
+    // PTP UDP payload to TX wrapper
     output reg  [7:0]  tx_axis_tdata,
     output reg         tx_axis_tvalid,
     output reg         tx_axis_tlast,
     input  wire        tx_axis_tready,
 
-    // Servo input
+    // Servo input (slave mode only)
     output reg         offset_valid,
     output reg signed [63:0] offset_ns,
     output reg signed [63:0] path_delay_ns,
 
-    // Time-set (only on initial sync, large offset)
     output reg         sec_set_en,
     output reg  [47:0] sec_set_val,
 
@@ -84,23 +79,31 @@ module ptp_pp (
 
     assign rx_axis_tready = 1'b1;
 
-    // ---- PTP message types (low nibble of octet 0) ----
+    // ---- PTP message types ----
     localparam MSG_SYNC        = 4'h0;
     localparam MSG_DELAY_REQ   = 4'h1;
     localparam MSG_FOLLOW_UP   = 4'h8;
     localparam MSG_DELAY_RESP  = 4'h9;
     localparam MSG_ANNOUNCE    = 4'hB;
 
-    // ---- Stored times for current exchange ----
+    // ---- Stored times for current exchange (slave) ----
     reg [47:0] t1_sec; reg [31:0] t1_nsec;
     reg [47:0] t2_sec; reg [31:0] t2_nsec;
     reg [47:0] t3_sec; reg [31:0] t3_nsec;
     reg [47:0] t4_sec; reg [31:0] t4_nsec;
-    reg signed [63:0] cf_sync;     // corrField from Sync (one-step) or FollowUp
-    reg signed [63:0] cf_delay;    // corrField from Delay_Resp
+    reg signed [63:0] cf_sync;
+    reg signed [63:0] cf_delay;
     reg t1_valid, t2_valid, t3_valid, t4_valid;
     reg [15:0] sync_seq_id;
     reg [15:0] delay_req_seq_id;
+
+    // ---- Master-side: Delay_Req receive metadata ----
+    reg [79:0] dreq_rx_ts;        // captured t4 (for Delay_Resp)
+    reg [79:0] dreq_src_clk_hi;   // bytes 20..23 of sourcePortIdentity (high)
+    reg [31:0] dreq_src_clk_lo;   // bytes 24..27 of sourcePortIdentity (low)
+    reg [15:0] dreq_src_port;     // bytes 28..29 (portNumber)
+    reg [15:0] dreq_seq_id;       // bytes 30..31
+    reg        dreq_pending;      // a Delay_Req has been received and needs Delay_Resp
 
     // ---- RX parser scratch ----
     reg [10:0] rx_byte_idx;
@@ -110,18 +113,24 @@ module ptp_pp (
     reg [15:0] rx_seq_id;
     reg [47:0] parsed_sec;
     reg [31:0] parsed_nsec;
-    reg        sync_one_step_pending; // captured ts but no follow_up needed
+    reg [79:0] parsed_src_clk_id;
+    reg [15:0] parsed_src_port;
 
-    // ---- Helper: signed full timestamp difference, ns ----
-    // Returns (a - b) in nanoseconds as a 64-bit signed integer.
-    // Handles seconds wrap correctly.
+    // ---- Sync period timer (master) ----
+    reg [31:0] sync_timer;
+    reg        sync_pending;     // master should send Sync now
+    reg        followup_pending; // master should send Follow_Up after Sync TX
+    reg [47:0] last_sync_tx_sec;
+    reg [31:0] last_sync_tx_nsec;
+    reg [15:0] master_seq_id;
+
+    // ---- Helper: 64-bit signed nanosecond difference (handles seconds wrap) ----
     function signed [63:0] ts_sub;
         input [47:0] a_sec; input [31:0] a_nsec;
         input [47:0] b_sec; input [31:0] b_nsec;
         reg signed [79:0] a_total, b_total;
         begin
-            a_total = $signed({a_sec, 32'b0}) - $signed({a_sec, 32'b0}) // dummy
-                    + ($signed({16'b0, a_sec}) * $signed(64'd1_000_000_000))
+            a_total = ($signed({16'b0, a_sec}) * $signed(64'd1_000_000_000))
                     + $signed({32'b0, a_nsec});
             b_total = ($signed({16'b0, b_sec}) * $signed(64'd1_000_000_000))
                     + $signed({32'b0, b_nsec});
@@ -129,12 +138,6 @@ module ptp_pp (
         end
     endfunction
 
-    // ---- Compute offset / path_delay when all timestamps are present ----
-    // RFC 1588-2008 §11.3:
-    //   master_to_slave_delay = (t2 - t1) - corrField_sync
-    //   slave_to_master_delay = (t4 - t3) - corrField_resp
-    //   meanPathDelay = (master_to_slave_delay + slave_to_master_delay) / 2
-    //   offsetFromMaster = master_to_slave_delay - meanPathDelay
     task compute_pi;
         reg signed [63:0] m2s, s2m, mpd, off;
         begin
@@ -149,31 +152,37 @@ module ptp_pp (
     endtask
 
     // ---- RX state machine ----
-    integer i;
     always @(posedge clk) begin
         if (rst) begin
-            rx_byte_idx           <= 0;
-            rx_msg_type           <= 0;
-            rx_two_step           <= 0;
-            rx_corr               <= 0;
-            rx_seq_id             <= 0;
-            parsed_sec            <= 0;
-            parsed_nsec           <= 0;
-            t1_valid              <= 0;
-            t2_valid              <= 0;
-            t4_valid              <= 0;
-            sync_seq_id           <= 0;
-            sync_one_step_pending <= 0;
-            cf_sync               <= 0;
-            cf_delay              <= 0;
-            rx_ts_consume         <= 0;
-            offset_valid          <= 0;
-            offset_ns             <= 0;
-            path_delay_ns         <= 0;
-            sec_set_en            <= 0;
-            sec_set_val           <= 0;
-            last_seq_id           <= 0;
-            sync_count            <= 0;
+            rx_byte_idx       <= 0;
+            rx_msg_type       <= 0;
+            rx_two_step       <= 0;
+            rx_corr           <= 0;
+            rx_seq_id         <= 0;
+            parsed_sec        <= 0;
+            parsed_nsec       <= 0;
+            parsed_src_clk_id <= 0;
+            parsed_src_port   <= 0;
+            t1_valid          <= 0;
+            t2_valid          <= 0;
+            t4_valid          <= 0;
+            sync_seq_id       <= 0;
+            cf_sync           <= 0;
+            cf_delay          <= 0;
+            rx_ts_consume     <= 0;
+            offset_valid      <= 0;
+            offset_ns         <= 0;
+            path_delay_ns     <= 0;
+            sec_set_en        <= 0;
+            sec_set_val       <= 0;
+            last_seq_id       <= 0;
+            sync_count        <= 0;
+            dreq_rx_ts        <= 0;
+            dreq_src_clk_hi   <= 0;
+            dreq_src_clk_lo   <= 0;
+            dreq_src_port     <= 0;
+            dreq_seq_id       <= 0;
+            dreq_pending      <= 0;
         end else begin
             offset_valid  <= 0;
             sec_set_en    <= 0;
@@ -182,7 +191,7 @@ module ptp_pp (
             if (rx_axis_tvalid) begin
                 case (rx_byte_idx)
                     11'd0:  rx_msg_type        <= rx_axis_tdata[3:0];
-                    11'd6:  rx_two_step        <= rx_axis_tdata[1];   // flagField hi, bit 1 = TWO_STEP
+                    11'd6:  rx_two_step        <= rx_axis_tdata[1];
                     11'd8:  rx_corr[63:56]     <= rx_axis_tdata;
                     11'd9:  rx_corr[55:48]     <= rx_axis_tdata;
                     11'd10: rx_corr[47:40]     <= rx_axis_tdata;
@@ -191,6 +200,17 @@ module ptp_pp (
                     11'd13: rx_corr[23:16]     <= rx_axis_tdata;
                     11'd14: rx_corr[15:8]      <= rx_axis_tdata;
                     11'd15: rx_corr[7:0]       <= rx_axis_tdata;
+                    // sourcePortIdentity (10 bytes: 8 clock id + 2 port number)
+                    11'd20: parsed_src_clk_id[79:72] <= rx_axis_tdata;
+                    11'd21: parsed_src_clk_id[71:64] <= rx_axis_tdata;
+                    11'd22: parsed_src_clk_id[63:56] <= rx_axis_tdata;
+                    11'd23: parsed_src_clk_id[55:48] <= rx_axis_tdata;
+                    11'd24: parsed_src_clk_id[47:40] <= rx_axis_tdata;
+                    11'd25: parsed_src_clk_id[39:32] <= rx_axis_tdata;
+                    11'd26: parsed_src_clk_id[31:24] <= rx_axis_tdata;
+                    11'd27: parsed_src_clk_id[23:16] <= rx_axis_tdata;
+                    11'd28: parsed_src_port[15:8]    <= rx_axis_tdata;
+                    11'd29: parsed_src_port[7:0]     <= rx_axis_tdata;
                     11'd30: rx_seq_id[15:8]    <= rx_axis_tdata;
                     11'd31: rx_seq_id[7:0]     <= rx_axis_tdata;
                     11'd34: parsed_sec[47:40]  <= rx_axis_tdata;
@@ -212,89 +232,157 @@ module ptp_pp (
                     rx_byte_idx <= 0;
                     last_seq_id <= rx_seq_id;
 
-                    case (rx_msg_type)
-                        MSG_SYNC: begin
-                            // Pop the RX timestamp FIFO entry that the
-                            // hardware capture unit produced for this frame.
-                            if (rx_ts_valid) begin
-                                t2_sec        <= rx_ts_sec;
-                                t2_nsec       <= rx_ts_nsec;
-                                t2_valid      <= 1'b1;
-                                rx_ts_consume <= 1'b1;
-                                sync_seq_id   <= rx_seq_id;
-                                sync_count    <= sync_count + 1;
-
-                                // One-step: Sync carries t1 directly in
-                                // the originTimestamp field, no Follow_Up.
-                                if (!rx_two_step) begin
-                                    t1_sec   <= parsed_sec;
-                                    t1_nsec  <= parsed_nsec;
-                                    t1_valid <= 1'b1;
-                                    cf_sync  <= rx_corr;
-                                    if (sync_count == 0) begin
-                                        sec_set_en  <= 1'b1;
-                                        sec_set_val <= parsed_sec;
+                    if (!mode_is_master) begin
+                        // ---- Slave-side handling ----
+                        case (rx_msg_type)
+                            MSG_SYNC: begin
+                                if (rx_ts_valid) begin
+                                    t2_sec        <= rx_ts_sec;
+                                    t2_nsec       <= rx_ts_nsec;
+                                    t2_valid      <= 1'b1;
+                                    rx_ts_consume <= 1'b1;
+                                    sync_seq_id   <= rx_seq_id;
+                                    sync_count    <= sync_count + 1;
+                                    if (!rx_two_step) begin
+                                        t1_sec   <= parsed_sec;
+                                        t1_nsec  <= parsed_nsec;
+                                        t1_valid <= 1'b1;
+                                        cf_sync  <= rx_corr;
+                                        if (sync_count == 0) begin
+                                            sec_set_en  <= 1'b1;
+                                            sec_set_val <= parsed_sec;
+                                        end
+                                    end else begin
+                                        cf_sync <= rx_corr;
                                     end
-                                end else begin
-                                    // Two-step: also keep the Sync's own
-                                    // correctionField. Per RFC §11.4.4
-                                    // the receiver must add the Sync corr
-                                    // field to the Follow_Up corr field.
-                                    cf_sync <= rx_corr;
                                 end
                             end
-                        end
 
-                        MSG_FOLLOW_UP: begin
-                            if (rx_seq_id == sync_seq_id) begin
+                            MSG_FOLLOW_UP: if (rx_seq_id == sync_seq_id) begin
                                 t1_sec   <= parsed_sec;
                                 t1_nsec  <= parsed_nsec;
                                 t1_valid <= 1'b1;
-                                // Sum sync corr + follow_up corr
                                 cf_sync  <= cf_sync + rx_corr;
                                 if (sync_count <= 32'd1) begin
                                     sec_set_en  <= 1'b1;
                                     sec_set_val <= parsed_sec;
                                 end
                             end
-                        end
 
-                        MSG_DELAY_RESP: begin
-                            if (rx_seq_id == delay_req_seq_id) begin
+                            MSG_DELAY_RESP: if (rx_seq_id == delay_req_seq_id) begin
                                 t4_sec   <= parsed_sec;
                                 t4_nsec  <= parsed_nsec;
                                 t4_valid <= 1'b1;
                                 cf_delay <= rx_corr;
                             end
-                        end
 
-                        default: ;
-                    endcase
+                            default: ;
+                        endcase
+                    end else begin
+                        // ---- Master-side handling ----
+                        if (rx_msg_type == MSG_DELAY_REQ && rx_ts_valid) begin
+                            // Capture t4 (our RX timestamp), source identity,
+                            // and seq id; queue a Delay_Resp.
+                            dreq_rx_ts        <= {rx_ts_sec, rx_ts_nsec};
+                            dreq_src_clk_hi   <= parsed_src_clk_id;
+                            dreq_src_clk_lo   <= 0;
+                            dreq_src_port     <= parsed_src_port;
+                            dreq_seq_id       <= rx_seq_id;
+                            dreq_pending      <= 1;
+                            rx_ts_consume     <= 1;
+                        end
+                    end
                 end
             end
 
-            // Compute when all four timestamps + corr fields are in.
-            if (t1_valid && t2_valid && t3_valid && t4_valid) begin
+            // ---- Slave: compute when all four timestamps are present ----
+            if (!mode_is_master && t1_valid && t2_valid && t3_valid && t4_valid) begin
                 compute_pi();
                 t1_valid <= 0;
                 t2_valid <= 0;
                 t3_valid <= 0;
                 t4_valid <= 0;
             end
+
+            // Clear dreq_pending when the TX state machine finishes Delay_Resp
+            if (!mode_is_master)
+                dreq_pending <= 0;
         end
     end
 
-    // ---- Delay_Req TX state machine ----
-    localparam TX_IDLE = 4'd0,
-               TX_PTP  = 4'd1,
-               TX_WAIT = 4'd2;
+    // ---- Sync period timer (master) ----
+    always @(posedge clk) begin
+        if (rst) begin
+            sync_timer        <= 0;
+            sync_pending      <= 0;
+            followup_pending  <= 0;
+            last_sync_tx_sec  <= 0;
+            last_sync_tx_nsec <= 0;
+            master_seq_id     <= 0;
+        end else begin
+            if (mode_is_master) begin
+                if (sync_timer == 0) begin
+                    sync_timer    <= sync_interval_cycles;
+                    sync_pending  <= 1;
+                end else begin
+                    sync_timer <= sync_timer - 1;
+                end
+            end else begin
+                sync_timer       <= 0;
+                sync_pending     <= 0;
+                followup_pending <= 0;
+            end
+        end
+    end
+
+    // ---- TX state machine ----
+    // Three message generators sharing the tx_axis output:
+    //   - Slave: Delay_Req (44 bytes)
+    //   - Master: Sync (44 bytes), Follow_Up (44 bytes), Delay_Resp (54 bytes)
+    localparam TX_IDLE        = 4'd0,
+               TX_DREQ        = 4'd1,
+               TX_DREQ_WAIT   = 4'd2,
+               TX_SYNC        = 4'd3,
+               TX_SYNC_WAIT   = 4'd4,
+               TX_FOLLOWUP    = 4'd5,
+               TX_DELAY_RESP  = 4'd6;
 
     reg [3:0]  tx_state;
     reg [10:0] tx_byte_idx;
     reg [15:0] my_seq_id;
     reg        delay_req_pending;
     reg [23:0] delay_req_timer;
-    localparam DELAY_REQ_INTERVAL = 24'd125_000_000; // ~1 sec at 125 MHz
+    localparam DELAY_REQ_INTERVAL = 24'd125_000_000;
+
+    // Helper: emit one byte of a generic 44-byte PTP header
+    // case ladder is large; broken into a function-like macro per state
+    `define HDR_BYTE(IDX, MSG, CTRL, LEN, FLAG_HI, FLAG_LO) \
+        case (IDX) \
+            11'd0:  tx_axis_tdata <= {4'h0, MSG}; \
+            11'd1:  tx_axis_tdata <= 8'h02; \
+            11'd2:  tx_axis_tdata <= 8'h00; \
+            11'd3:  tx_axis_tdata <= LEN; \
+            11'd4:  tx_axis_tdata <= 8'h00; \
+            11'd5:  tx_axis_tdata <= 8'h00; \
+            11'd6:  tx_axis_tdata <= FLAG_HI; \
+            11'd7:  tx_axis_tdata <= FLAG_LO; \
+            11'd8,11'd9,11'd10,11'd11,11'd12,11'd13,11'd14,11'd15: \
+                    tx_axis_tdata <= 8'h00; \
+            11'd16,11'd17,11'd18,11'd19: tx_axis_tdata <= 8'h00; \
+            11'd20: tx_axis_tdata <= local_clock_id[63:56]; \
+            11'd21: tx_axis_tdata <= local_clock_id[55:48]; \
+            11'd22: tx_axis_tdata <= local_clock_id[47:40]; \
+            11'd23: tx_axis_tdata <= local_clock_id[39:32]; \
+            11'd24: tx_axis_tdata <= local_clock_id[31:24]; \
+            11'd25: tx_axis_tdata <= local_clock_id[23:16]; \
+            11'd26: tx_axis_tdata <= local_clock_id[15:8]; \
+            11'd27: tx_axis_tdata <= local_clock_id[7:0]; \
+            11'd28: tx_axis_tdata <= 8'h00; \
+            11'd29: tx_axis_tdata <= 8'h01; \
+            11'd32: tx_axis_tdata <= CTRL; \
+            11'd33: tx_axis_tdata <= 8'hFD; \
+            default: ; \
+        endcase
 
     always @(posedge clk) begin
         if (rst) begin
@@ -314,78 +402,155 @@ module ptp_pp (
             tx_axis_tlast  <= 0;
             tx_ts_consume  <= 0;
 
-            if (t2_valid && delay_req_timer == 0) begin
-                delay_req_pending <= 1;
-                delay_req_timer   <= DELAY_REQ_INTERVAL;
-                my_seq_id         <= my_seq_id + 1;
-            end else if (delay_req_timer > 0) begin
-                delay_req_timer <= delay_req_timer - 1;
+            // ---- Slave: Delay_Req trigger ----
+            if (!mode_is_master) begin
+                if (t2_valid && delay_req_timer == 0) begin
+                    delay_req_pending <= 1;
+                    delay_req_timer   <= DELAY_REQ_INTERVAL;
+                    my_seq_id         <= my_seq_id + 1;
+                end else if (delay_req_timer > 0) begin
+                    delay_req_timer <= delay_req_timer - 1;
+                end
+            end else begin
+                delay_req_pending <= 0;
+                delay_req_timer   <= 0;
             end
+
+            // ---- Master: Sync trigger ----
+            // master_seq_id is incremented when we send a Sync.
+            // followup_pending is set when sync TX completes.
 
             case (tx_state)
                 TX_IDLE: begin
-                    if (delay_req_pending && tx_axis_tready) begin
-                        tx_state          <= TX_PTP;
+                    if (mode_is_master && sync_pending && tx_axis_tready) begin
+                        tx_state    <= TX_SYNC;
+                        tx_byte_idx <= 0;
+                    end else if (mode_is_master && dreq_pending && tx_axis_tready) begin
+                        tx_state    <= TX_DELAY_RESP;
+                        tx_byte_idx <= 0;
+                    end else if (mode_is_master && followup_pending && tx_axis_tready) begin
+                        tx_state    <= TX_FOLLOWUP;
+                        tx_byte_idx <= 0;
+                    end else if (!mode_is_master && delay_req_pending && tx_axis_tready) begin
+                        tx_state          <= TX_DREQ;
                         tx_byte_idx       <= 0;
                         delay_req_seq_id  <= my_seq_id;
                         delay_req_pending <= 0;
                     end
                 end
 
-                TX_PTP: begin
+                // ---------------- Slave: Delay_Req ----------------
+                TX_DREQ: begin
                     tx_axis_tvalid <= 1;
-                    case (tx_byte_idx)
-                        11'd0:  tx_axis_tdata <= {4'h0, MSG_DELAY_REQ};
-                        11'd1:  tx_axis_tdata <= 8'h02;     // versionPTP=2
-                        11'd2:  tx_axis_tdata <= 8'h00;     // length hi
-                        11'd3:  tx_axis_tdata <= 8'd44;     // length lo
-                        11'd4:  tx_axis_tdata <= 8'h00;     // domain
-                        11'd5:  tx_axis_tdata <= 8'h00;
-                        11'd6:  tx_axis_tdata <= 8'h00;     // flagField hi
-                        11'd7:  tx_axis_tdata <= 8'h00;     // flagField lo
-                        11'd8,11'd9,11'd10,11'd11,
-                        11'd12,11'd13,11'd14,11'd15:
-                                tx_axis_tdata <= 8'h00;     // correctionField
-                        11'd16,11'd17,11'd18,11'd19:
-                                tx_axis_tdata <= 8'h00;
-                        11'd20: tx_axis_tdata <= local_clock_id[63:56];
-                        11'd21: tx_axis_tdata <= local_clock_id[55:48];
-                        11'd22: tx_axis_tdata <= local_clock_id[47:40];
-                        11'd23: tx_axis_tdata <= local_clock_id[39:32];
-                        11'd24: tx_axis_tdata <= local_clock_id[31:24];
-                        11'd25: tx_axis_tdata <= local_clock_id[23:16];
-                        11'd26: tx_axis_tdata <= local_clock_id[15:8];
-                        11'd27: tx_axis_tdata <= local_clock_id[7:0];
-                        11'd28: tx_axis_tdata <= 8'h00;
-                        11'd29: tx_axis_tdata <= 8'h01;     // portNumber=1
-                        11'd30: tx_axis_tdata <= my_seq_id[15:8];
-                        11'd31: tx_axis_tdata <= my_seq_id[7:0];
-                        11'd32: tx_axis_tdata <= 8'h01;     // controlField (Delay_Req)
-                        11'd33: tx_axis_tdata <= 8'h7F;     // logMsgInterval
-                        11'd34,11'd35,11'd36,11'd37,11'd38,11'd39,
-                        11'd40,11'd41,11'd42,11'd43:
-                                tx_axis_tdata <= 8'h00;     // origin ts (zero)
-                        default: tx_axis_tdata <= 8'h00;
-                    endcase
-
+                    `HDR_BYTE(tx_byte_idx, MSG_DELAY_REQ, 8'h01, 8'd44, 8'h00, 8'h00)
+                    if (tx_byte_idx == 11'd30) tx_axis_tdata <= my_seq_id[15:8];
+                    if (tx_byte_idx == 11'd31) tx_axis_tdata <= my_seq_id[7:0];
+                    if (tx_byte_idx >= 11'd34 && tx_byte_idx <= 11'd43)
+                        tx_axis_tdata <= 8'h00;
                     if (tx_axis_tready) begin
                         tx_byte_idx <= tx_byte_idx + 1;
                         if (tx_byte_idx == 11'd43) begin
                             tx_axis_tlast <= 1;
-                            tx_state      <= TX_WAIT;
+                            tx_state      <= TX_DREQ_WAIT;
                         end
                     end
                 end
 
-                TX_WAIT: begin
-                    // The MAC will produce a TX SFD pulse, which the
-                    // timestamp unit captures and pushes into tx_ts FIFO.
-                    if (tx_ts_valid) begin
-                        t3_sec        <= tx_ts_sec;
-                        t3_nsec       <= tx_ts_nsec;
-                        t3_valid      <= 1;
-                        tx_ts_consume <= 1;
-                        tx_state      <= TX_IDLE;
+                TX_DREQ_WAIT: if (tx_ts_valid) begin
+                    t3_sec        <= tx_ts_sec;
+                    t3_nsec       <= tx_ts_nsec;
+                    t3_valid      <= 1;
+                    tx_ts_consume <= 1;
+                    tx_state      <= TX_IDLE;
+                end
+
+                // ---------------- Master: Sync ----------------
+                TX_SYNC: begin
+                    tx_axis_tvalid <= 1;
+                    `HDR_BYTE(tx_byte_idx, MSG_SYNC, 8'h00, 8'd44, 8'h02, 8'h00) // twoStepFlag set
+                    if (tx_byte_idx == 11'd30) tx_axis_tdata <= master_seq_id[15:8];
+                    if (tx_byte_idx == 11'd31) tx_axis_tdata <= master_seq_id[7:0];
+                    if (tx_byte_idx >= 11'd34 && tx_byte_idx <= 11'd43)
+                        tx_axis_tdata <= 8'h00;
+                    if (tx_axis_tready) begin
+                        tx_byte_idx <= tx_byte_idx + 1;
+                        if (tx_byte_idx == 11'd43) begin
+                            tx_axis_tlast <= 1;
+                            tx_state      <= TX_SYNC_WAIT;
+                            sync_pending  <= 0;
+                        end
+                    end
+                end
+
+                TX_SYNC_WAIT: if (tx_ts_valid) begin
+                    last_sync_tx_sec  <= tx_ts_sec;
+                    last_sync_tx_nsec <= tx_ts_nsec;
+                    tx_ts_consume     <= 1;
+                    followup_pending  <= 1;
+                    tx_state          <= TX_IDLE;
+                end
+
+                // ---------------- Master: Follow_Up ----------------
+                TX_FOLLOWUP: begin
+                    tx_axis_tvalid <= 1;
+                    `HDR_BYTE(tx_byte_idx, MSG_FOLLOW_UP, 8'h02, 8'd44, 8'h00, 8'h00)
+                    if (tx_byte_idx == 11'd30) tx_axis_tdata <= master_seq_id[15:8];
+                    if (tx_byte_idx == 11'd31) tx_axis_tdata <= master_seq_id[7:0];
+                    if (tx_byte_idx == 11'd34) tx_axis_tdata <= last_sync_tx_sec[47:40];
+                    if (tx_byte_idx == 11'd35) tx_axis_tdata <= last_sync_tx_sec[39:32];
+                    if (tx_byte_idx == 11'd36) tx_axis_tdata <= last_sync_tx_sec[31:24];
+                    if (tx_byte_idx == 11'd37) tx_axis_tdata <= last_sync_tx_sec[23:16];
+                    if (tx_byte_idx == 11'd38) tx_axis_tdata <= last_sync_tx_sec[15:8];
+                    if (tx_byte_idx == 11'd39) tx_axis_tdata <= last_sync_tx_sec[7:0];
+                    if (tx_byte_idx == 11'd40) tx_axis_tdata <= last_sync_tx_nsec[31:24];
+                    if (tx_byte_idx == 11'd41) tx_axis_tdata <= last_sync_tx_nsec[23:16];
+                    if (tx_byte_idx == 11'd42) tx_axis_tdata <= last_sync_tx_nsec[15:8];
+                    if (tx_byte_idx == 11'd43) tx_axis_tdata <= last_sync_tx_nsec[7:0];
+                    if (tx_axis_tready) begin
+                        tx_byte_idx <= tx_byte_idx + 1;
+                        if (tx_byte_idx == 11'd43) begin
+                            tx_axis_tlast    <= 1;
+                            tx_state         <= TX_IDLE;
+                            followup_pending <= 0;
+                            master_seq_id    <= master_seq_id + 1;
+                        end
+                    end
+                end
+
+                // ---------------- Master: Delay_Resp (54 bytes) ----------------
+                TX_DELAY_RESP: begin
+                    tx_axis_tvalid <= 1;
+                    `HDR_BYTE(tx_byte_idx, MSG_DELAY_RESP, 8'h03, 8'd54, 8'h00, 8'h00)
+                    if (tx_byte_idx == 11'd30) tx_axis_tdata <= dreq_seq_id[15:8];
+                    if (tx_byte_idx == 11'd31) tx_axis_tdata <= dreq_seq_id[7:0];
+                    // requestReceiptTimestamp (t4 = our RX SFD timestamp)
+                    if (tx_byte_idx == 11'd34) tx_axis_tdata <= dreq_rx_ts[79:72];
+                    if (tx_byte_idx == 11'd35) tx_axis_tdata <= dreq_rx_ts[71:64];
+                    if (tx_byte_idx == 11'd36) tx_axis_tdata <= dreq_rx_ts[63:56];
+                    if (tx_byte_idx == 11'd37) tx_axis_tdata <= dreq_rx_ts[55:48];
+                    if (tx_byte_idx == 11'd38) tx_axis_tdata <= dreq_rx_ts[47:40];
+                    if (tx_byte_idx == 11'd39) tx_axis_tdata <= dreq_rx_ts[39:32];
+                    if (tx_byte_idx == 11'd40) tx_axis_tdata <= dreq_rx_ts[31:24];
+                    if (tx_byte_idx == 11'd41) tx_axis_tdata <= dreq_rx_ts[23:16];
+                    if (tx_byte_idx == 11'd42) tx_axis_tdata <= dreq_rx_ts[15:8];
+                    if (tx_byte_idx == 11'd43) tx_axis_tdata <= dreq_rx_ts[7:0];
+                    // requestingPortIdentity (10 bytes: 8 clk id + 2 port number)
+                    if (tx_byte_idx == 11'd44) tx_axis_tdata <= dreq_src_clk_hi[79:72];
+                    if (tx_byte_idx == 11'd45) tx_axis_tdata <= dreq_src_clk_hi[71:64];
+                    if (tx_byte_idx == 11'd46) tx_axis_tdata <= dreq_src_clk_hi[63:56];
+                    if (tx_byte_idx == 11'd47) tx_axis_tdata <= dreq_src_clk_hi[55:48];
+                    if (tx_byte_idx == 11'd48) tx_axis_tdata <= dreq_src_clk_hi[47:40];
+                    if (tx_byte_idx == 11'd49) tx_axis_tdata <= dreq_src_clk_hi[39:32];
+                    if (tx_byte_idx == 11'd50) tx_axis_tdata <= dreq_src_clk_hi[31:24];
+                    if (tx_byte_idx == 11'd51) tx_axis_tdata <= dreq_src_clk_hi[23:16];
+                    if (tx_byte_idx == 11'd52) tx_axis_tdata <= dreq_src_port[15:8];
+                    if (tx_byte_idx == 11'd53) tx_axis_tdata <= dreq_src_port[7:0];
+                    if (tx_axis_tready) begin
+                        tx_byte_idx <= tx_byte_idx + 1;
+                        if (tx_byte_idx == 11'd53) begin
+                            tx_axis_tlast <= 1;
+                            tx_state      <= TX_IDLE;
+                        end
                     end
                 end
 

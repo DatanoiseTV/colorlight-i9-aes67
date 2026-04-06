@@ -11,6 +11,7 @@ on the same physical Ethernet — without ever touching the RTP data path.
 |---|---|
 | Hardware MAC | Custom 1 Gbps RGMII MAC with **byte-precise SFD pulses** for PTP timestamping |
 | PTP (RFC 1588-2008) | Full Verilog: clock NCO, **hardware timestamp capture with PHY/cable asymmetry compensation** (RFC §7.4), packet processor with **correctionField subtraction** (RFC §11.3), **second-rollover-correct offset math**, **twoStepFlag** awareness, low-pass filter, hysteretic PI servo, lock detector |
+| **Master + Slave** | **Full bidirectional PTP**: hardware generates Sync + Follow_Up + Delay_Resp in master mode, processes them in slave mode. **BMC algorithm** (RFC §9.3) runs in firmware, drives the `mode_is_master` CSR based on Announce messages on UDP port 320. Default Sync interval: 125 ms (8/sec). |
 | **Latency** | **125 µs** packet time, **500 µs** jitter buffer, **cut-through** packet router (~336 ns vs 12 µs store-and-forward), **PTP-disciplined** audio NCO |
 | RTP | Hardware TX + RX engines with L24 codec, BRAM jitter buffer |
 | Audio I/O | I2S **and TDM** master (up to 16 channels) clocked by a PTP-disciplined NCO |
@@ -20,7 +21,7 @@ on the same physical Ethernet — without ever touching the RTP data path.
 | **SAP** (RFC 2974) | Multicast session announcement on `239.255.255.255:9875` with AES67-compliant SDP including `ts-refclk` and `mediaclk` attributes; remote source discovery cache |
 | mDNS | lwIP mdns_responder advertising `_ravenna._udp` and `_http._tcp` |
 | HTTP | lwIP httpd with `/status.cgi` JSON endpoint |
-| Virtual I2S | CPU-accessible audio FIFO that mixes into the RTP TX path or replaces channels |
+| Virtual TDM-16 | CPU-accessible 16-channel audio FIFO that mixes into the RTP TX path or replaces channels |
 | PLL | Real ECP5 `EHXPLLL` (25 → 125 MHz @ 0° + 90°) |
 | Reset | Async-assert / sync-deassert reset synchronizer |
 | Toolchain | Reproducible Docker image with OSS CAD Suite + LiteX + lwIP + RV32 GCC |

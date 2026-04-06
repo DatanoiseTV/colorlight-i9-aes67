@@ -27,6 +27,7 @@
 
 #include "litex_netif.h"
 #include "sap.h"
+#include "ptp_bmc.h"
 
 extern void aes67_status_init(void);
 
@@ -171,13 +172,18 @@ int main(void)
     // SAP / SDP session announcement (RFC 2974)
     sap_init();
 
+    // Best Master Clock algorithm (RFC 1588 §9)
+    // Drives the hardware mode_is_master CSR based on Announce messages
+    ptp_bmc_init();
+
     printf("Services up. Entering main loop.\n");
 
-    // Main loop: poll netif, drive lwIP timers, run SAP, print status
+    // Main loop: poll netif, drive lwIP timers, run SAP + BMC, print status
     while (1) {
         litex_netif_poll(&s_netif);
         sys_check_timeouts();
         sap_poll();
+        ptp_bmc_poll();
         print_periodic_status();
     }
 

@@ -12,7 +12,9 @@
 //   - New: ~336 ns (42-byte header + sink fan-out)
 //
 // Routing rules:
-//   - PTP        : EtherType 0x88F7 OR UDP dst port 319/320  -> ptp_rx (UDP payload)
+//   - PTP        : -> ptp_rx (UDP payload) AND cpu_rx (full Ethernet frame)
+//                  Forked: hardware processes Sync/FollowUp/DelayReq/DelayResp,
+//                  CPU runs BMC on Announce messages over the same path.
 //   - RTP        : UDP dst port == rtp_port AND dst IP == rtp_mcast_ip -> rtp_rx (UDP payload)
 //   - everything : -> cpu_rx (full Ethernet frame)
 //
@@ -67,13 +69,13 @@ module packet_router (
     reg [15:0] f_dst_port;
     reg [31:0] f_dst_ip;
 
-    // Decision
+    // Decision (PTP_FORK = forward to BOTH PTP hardware and CPU)
     localparam [2:0]
-        D_NONE = 3'd0,
-        D_PTP  = 3'd1,
-        D_RTP  = 3'd2,
-        D_CPU  = 3'd3,
-        D_DROP = 3'd4;
+        D_NONE     = 3'd0,
+        D_PTP_FORK = 3'd1,
+        D_RTP      = 3'd2,
+        D_CPU      = 3'd3,
+        D_DROP     = 3'd4;
     reg [2:0] dest;
 
     // CPU header replay buffer (only used for CPU path)
@@ -140,12 +142,15 @@ module packet_router (
                 // ---- Decision after byte 37 (UDP dst port lo) ----
                 if (byte_idx == 11'd37) begin
                     if (f_ethertype == 16'h88F7) begin
-                        dest <= D_PTP;
+                        dest          <= D_PTP_FORK;
+                        replay_active <= 1;          // CPU also gets PTP
+                        replay_idx    <= 0;
                     end else if (f_ethertype == 16'h0800 && f_proto == 8'd17) begin
-                        // Use the just-arrived byte (low byte of dst port)
                         if (({f_dst_port[15:8], mac_rx_tdata} == 16'd319) ||
                             ({f_dst_port[15:8], mac_rx_tdata} == 16'd320)) begin
-                            dest <= D_PTP;
+                            dest          <= D_PTP_FORK;
+                            replay_active <= 1;
+                            replay_idx    <= 0;
                         end else if (({f_dst_port[15:8], mac_rx_tdata} == rtp_port) &&
                                      (f_dst_ip == rtp_mcast_ip)) begin
                             dest <= D_RTP;
@@ -164,10 +169,17 @@ module packet_router (
                 // ---- Stream from byte 42+ to the chosen sink ----
                 if (byte_idx >= UDP_PAYLOAD_OFFSET) begin
                     case (dest)
-                        D_PTP: begin
+                        D_PTP_FORK: begin
+                            // Hardware: UDP payload only
                             ptp_rx_tdata  <= mac_rx_tdata;
                             ptp_rx_tvalid <= 1;
                             ptp_rx_tlast  <= mac_rx_tlast & ~mac_rx_tuser;
+                            // CPU: full Ethernet frame (header replay then live)
+                            if (!replay_active) begin
+                                cpu_rx_tdata  <= mac_rx_tdata;
+                                cpu_rx_tvalid <= 1;
+                                cpu_rx_tlast  <= mac_rx_tlast & ~mac_rx_tuser;
+                            end
                         end
                         D_RTP: begin
                             rtp_rx_tdata  <= mac_rx_tdata;

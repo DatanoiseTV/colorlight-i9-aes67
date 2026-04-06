@@ -18,7 +18,8 @@ APP_SRCS = \
     litex_netif.c \
     sys_now.c \
     aes67_status.c \
-    sap.c
+    sap.c \
+    ptp_bmc.c
 
 # ---- lwIP core sources -----------------------------------------------------
 LWIP_CORE_SRCS = \
