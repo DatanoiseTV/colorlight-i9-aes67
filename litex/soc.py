@@ -77,21 +77,31 @@ _io = [
     ),
 
     # SDRAM (M12L64322A 8MB 32-bit)
+    #
+    # Verified against the official Colorlight i9 v7.2 schematic. Three
+    # signals are NOT exposed to the FPGA - they are tied to power rails
+    # on the PCB and so do not appear in any Subsignal here:
+    #
+    #   CKE   tied to VCC (always enabled)
+    #   CS#   tied to GND (chip is always selected)
+    #   DQM   four lanes all tied to GND (no per-byte write masking)
+    #
+    # The standard LiteX GENSDRPHY assumes those signals exist; using
+    # SDRAM on this board therefore requires a custom PHY that omits
+    # them. The Subsignal list below is the wire-accurate truth - any
+    # PHY that drives cke / cs / dm against this _io would error.
     ("sdram_clock", 0, Pins("B9"), IOStandard("LVCMOS33")),
     ("sdram", 0,
-        Subsignal("a",   Pins("A7 A6 A5 A4 C7 C6 C5 C4 E7 D6 D5")),
-        Subsignal("ba",  Pins("B11 C8")),
-        Subsignal("cs_n", Pins("B7")),
-        Subsignal("cke", Pins("B12")),
+        Subsignal("a",     Pins("B13 C14 A16 A17 B16 B15 A14 A13 A12 A11 B12")),
+        Subsignal("ba",    Pins("B11 C8")),
         Subsignal("ras_n", Pins("B10")),
-        Subsignal("cas_n", Pins("A10")),
-        Subsignal("we_n",  Pins("A9")),
-        Subsignal("dm",  Pins("A8 B8 E9 D9")),
-        Subsignal("dq",  Pins(
-            "C2 C1 D2 D1 E2 E1 F2 F1",
-            "G5 H4 H5 J4 J5 K4 K5 L4",
-            "E11 D11 D12 C12 D13 C13 D14 C14",
-            "E14 D15 E15 C15 E16 D16 D17 C17",
+        Subsignal("cas_n", Pins("A9")),
+        Subsignal("we_n",  Pins("A10")),
+        Subsignal("dq",    Pins(
+            "B6  A5  A6  A7  C7  B8  B5  A8 ",
+            "D8  D7  E8  D6  C6  D5  E7  C5 ",
+            "C10 D9  E11 D11 C11 D12 E9  C12",
+            "E14 C15 E13 D15 E12 B17 D14 D13",
         )),
         IOStandard("LVCMOS33"),
         Misc("SLEWRATE=FAST"),

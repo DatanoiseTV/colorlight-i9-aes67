@@ -343,8 +343,54 @@ Implemented and integrated in the latest build:
 
 Still on the to-do list:
 - PHY 1 currently tied off — bring up for redundancy / second network
-- Re-enable SDRAM in the LiteX build once the actual i9 v7.2 SDRAM pin
-  names are confirmed against the schematic
+- Re-enable SDRAM in the LiteX build (the pin map is now correct, but the
+  board's CKE/CS#/DQM tie-offs require a small custom PHY — see the
+  "i9 v7.2 SDRAM quirks" section below)
+
+## i9 v7.2 board quirks
+
+Pin assignments in this repo are now verified against the official
+[Colorlight i9 v7.2 reference](https://github.com/wuxx/Colorlight-FPGA-Projects/blob/master/colorlight_i9_v7.2.md).
+A few things on this board are unusual and worth knowing about:
+
+### SDRAM (M12L64322A) – three signals are not on FPGA balls
+
+The SDRAM is wired so that:
+
+| Signal | Where it goes |
+|--------|---------------|
+| CKE    | Tied to **VCC** on the PCB (always enabled) |
+| CS#    | Tied to **GND** (chip is always selected) |
+| DQM[0..3] | All tied to **GND** (no per-byte write masking) |
+
+The FPGA cannot drive any of these — they aren't even routed to a ball.
+Consequently the standard LiteX `GENSDRPHY` (which assumes CKE/CS#/DQM
+exist) will not work on this board out of the box. A small board-specific
+PHY that omits those signals is needed; the `_io` Subsignal list in
+`litex/soc.py` deliberately reflects this wire-accurate truth.
+
+The 27-signal pin map (CLK + RAS#/CAS#/WE# + BA[1:0] + A[10:0] + DQ[31:0])
+in both `constraints/colorlight_i9_v7.2.lpf` and `litex/soc.py` is correct.
+
+### Two Ethernet PHYs share one MDIO bus
+
+PHY 0 (U29) and PHY 1 (U30) both use the same MDC pin (P5), MDIO pin (N5),
+and reset pin (P4). Software must select the target PHY by address (typically
+0x00 for PHY 0 and 0x01 for PHY 1) when issuing reads/writes through the
+`mdio_master` peripheral.
+
+### LED D2 collides with SODIMM pin 41
+
+Both the on-board LED D2 and SODIMM pin 41 are connected to FPGA ball **L2**.
+If you use the SODIMM header for I/O, do not assign anything to L2 — that
+ball is reserved for the LED. The pinout in this repo respects this.
+
+### SODIMM pins 13-39 are PHY magnetics, not GPIOs
+
+The first ~13 GPIO-looking SODIMM pins (13-39) are actually the differential
+pairs going from the on-board PHYs to the RJ45 jacks on the ext-board. They
+are post-PHY signals and are not visible to the FPGA. Only SODIMM pins 41-156
+are real GPIOs.
 
 ## License
 

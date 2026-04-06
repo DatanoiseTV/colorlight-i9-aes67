@@ -78,65 +78,71 @@ IOBUF PORT "eth_mdc"   IO_TYPE=LVCMOS33;
 IOBUF PORT "eth_rst_n" IO_TYPE=LVCMOS33;
 
 ## ---- SDRAM (M12L64322A, 8MB, 32-bit) ----
+##
+## Pin assignments verified against the official Colorlight i9 v7.2 schematic
+## (https://github.com/wuxx/Colorlight-FPGA-Projects/blob/master/colorlight_i9_v7.2.md).
+##
+## IMPORTANT BOARD QUIRKS:
+##  - CKE   is hard-wired to VCC on the PCB (always enabled, not driven by FPGA)
+##  - CS#   is hard-wired to GND (chip is always selected, not driven by FPGA)
+##  - DQM0..DQM3 are all tied to GND (no per-byte write masking, all 32 bits
+##    are always written together)
+##
+## A LiteX SDRAM PHY for this board therefore must NOT drive cke / cs# / dqm
+## as outputs - they don't go to FPGA balls. The standard GENSDRPHY assumes
+## those signals exist; a custom board-specific PHY is required.
+
 LOCATE COMP "sdram_clk"    SITE "B9";
-LOCATE COMP "sdram_cke"    SITE "B12";
-LOCATE COMP "sdram_cs_n"   SITE "B7";
 LOCATE COMP "sdram_ras_n"  SITE "B10";
-LOCATE COMP "sdram_cas_n"  SITE "A10";
-LOCATE COMP "sdram_we_n"   SITE "A9";
+LOCATE COMP "sdram_cas_n"  SITE "A9";
+LOCATE COMP "sdram_we_n"   SITE "A10";
 LOCATE COMP "sdram_ba[0]"  SITE "B11";
 LOCATE COMP "sdram_ba[1]"  SITE "C8";
-LOCATE COMP "sdram_a[0]"   SITE "A7";
-LOCATE COMP "sdram_a[1]"   SITE "A6";
-LOCATE COMP "sdram_a[2]"   SITE "A5";
-LOCATE COMP "sdram_a[3]"   SITE "A4";
-LOCATE COMP "sdram_a[4]"   SITE "C7";
-LOCATE COMP "sdram_a[5]"   SITE "C6";
-LOCATE COMP "sdram_a[6]"   SITE "C5";
-LOCATE COMP "sdram_a[7]"   SITE "C4";
-LOCATE COMP "sdram_a[8]"   SITE "E7";
-LOCATE COMP "sdram_a[9]"   SITE "D6";
-LOCATE COMP "sdram_a[10]"  SITE "D5";
-LOCATE COMP "sdram_dqm[0]" SITE "A8";
-LOCATE COMP "sdram_dqm[1]" SITE "B8";
-LOCATE COMP "sdram_dqm[2]" SITE "E9";
-LOCATE COMP "sdram_dqm[3]" SITE "D9";
-LOCATE COMP "sdram_dq[0]"  SITE "C2";
-LOCATE COMP "sdram_dq[1]"  SITE "C1";
-LOCATE COMP "sdram_dq[2]"  SITE "D2";
-LOCATE COMP "sdram_dq[3]"  SITE "D1";
-LOCATE COMP "sdram_dq[4]"  SITE "E2";
-LOCATE COMP "sdram_dq[5]"  SITE "E1";
-LOCATE COMP "sdram_dq[6]"  SITE "F2";
-LOCATE COMP "sdram_dq[7]"  SITE "F1";
-LOCATE COMP "sdram_dq[8]"  SITE "G5";
-LOCATE COMP "sdram_dq[9]"  SITE "H4";
-LOCATE COMP "sdram_dq[10]" SITE "H5";
-LOCATE COMP "sdram_dq[11]" SITE "J4";
-LOCATE COMP "sdram_dq[12]" SITE "J5";
-LOCATE COMP "sdram_dq[13]" SITE "K4";
-LOCATE COMP "sdram_dq[14]" SITE "K5";
-LOCATE COMP "sdram_dq[15]" SITE "L4";
-LOCATE COMP "sdram_dq[16]" SITE "E11";
-LOCATE COMP "sdram_dq[17]" SITE "D11";
-LOCATE COMP "sdram_dq[18]" SITE "D12";
-LOCATE COMP "sdram_dq[19]" SITE "C12";
-LOCATE COMP "sdram_dq[20]" SITE "D13";
-LOCATE COMP "sdram_dq[21]" SITE "C13";
-LOCATE COMP "sdram_dq[22]" SITE "D14";
-LOCATE COMP "sdram_dq[23]" SITE "C14";
+LOCATE COMP "sdram_a[0]"   SITE "B13";
+LOCATE COMP "sdram_a[1]"   SITE "C14";
+LOCATE COMP "sdram_a[2]"   SITE "A16";
+LOCATE COMP "sdram_a[3]"   SITE "A17";
+LOCATE COMP "sdram_a[4]"   SITE "B16";
+LOCATE COMP "sdram_a[5]"   SITE "B15";
+LOCATE COMP "sdram_a[6]"   SITE "A14";
+LOCATE COMP "sdram_a[7]"   SITE "A13";
+LOCATE COMP "sdram_a[8]"   SITE "A12";
+LOCATE COMP "sdram_a[9]"   SITE "A11";
+LOCATE COMP "sdram_a[10]"  SITE "B12";
+LOCATE COMP "sdram_dq[0]"  SITE "B6";
+LOCATE COMP "sdram_dq[1]"  SITE "A5";
+LOCATE COMP "sdram_dq[2]"  SITE "A6";
+LOCATE COMP "sdram_dq[3]"  SITE "A7";
+LOCATE COMP "sdram_dq[4]"  SITE "C7";
+LOCATE COMP "sdram_dq[5]"  SITE "B8";
+LOCATE COMP "sdram_dq[6]"  SITE "B5";
+LOCATE COMP "sdram_dq[7]"  SITE "A8";
+LOCATE COMP "sdram_dq[8]"  SITE "D8";
+LOCATE COMP "sdram_dq[9]"  SITE "D7";
+LOCATE COMP "sdram_dq[10]" SITE "E8";
+LOCATE COMP "sdram_dq[11]" SITE "D6";
+LOCATE COMP "sdram_dq[12]" SITE "C6";
+LOCATE COMP "sdram_dq[13]" SITE "D5";
+LOCATE COMP "sdram_dq[14]" SITE "E7";
+LOCATE COMP "sdram_dq[15]" SITE "C5";
+LOCATE COMP "sdram_dq[16]" SITE "C10";
+LOCATE COMP "sdram_dq[17]" SITE "D9";
+LOCATE COMP "sdram_dq[18]" SITE "E11";
+LOCATE COMP "sdram_dq[19]" SITE "D11";
+LOCATE COMP "sdram_dq[20]" SITE "C11";
+LOCATE COMP "sdram_dq[21]" SITE "D12";
+LOCATE COMP "sdram_dq[22]" SITE "E9";
+LOCATE COMP "sdram_dq[23]" SITE "C12";
 LOCATE COMP "sdram_dq[24]" SITE "E14";
-LOCATE COMP "sdram_dq[25]" SITE "D15";
-LOCATE COMP "sdram_dq[26]" SITE "E15";
-LOCATE COMP "sdram_dq[27]" SITE "C15";
-LOCATE COMP "sdram_dq[28]" SITE "E16";
-LOCATE COMP "sdram_dq[29]" SITE "D16";
-LOCATE COMP "sdram_dq[30]" SITE "D17";
-LOCATE COMP "sdram_dq[31]" SITE "C17";
+LOCATE COMP "sdram_dq[25]" SITE "C15";
+LOCATE COMP "sdram_dq[26]" SITE "E13";
+LOCATE COMP "sdram_dq[27]" SITE "D15";
+LOCATE COMP "sdram_dq[28]" SITE "E12";
+LOCATE COMP "sdram_dq[29]" SITE "B17";
+LOCATE COMP "sdram_dq[30]" SITE "D14";
+LOCATE COMP "sdram_dq[31]" SITE "D13";
 
 IOBUF PORT "sdram_clk"    IO_TYPE=LVCMOS33;
-IOBUF PORT "sdram_cke"    IO_TYPE=LVCMOS33;
-IOBUF PORT "sdram_cs_n"   IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_ras_n"  IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_cas_n"  IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_we_n"   IO_TYPE=LVCMOS33;
@@ -153,10 +159,6 @@ IOBUF PORT "sdram_a[7]"   IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_a[8]"   IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_a[9]"   IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_a[10]"  IO_TYPE=LVCMOS33;
-IOBUF PORT "sdram_dqm[0]" IO_TYPE=LVCMOS33;
-IOBUF PORT "sdram_dqm[1]" IO_TYPE=LVCMOS33;
-IOBUF PORT "sdram_dqm[2]" IO_TYPE=LVCMOS33;
-IOBUF PORT "sdram_dqm[3]" IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_dq[0]"  IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_dq[1]"  IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_dq[2]"  IO_TYPE=LVCMOS33;
@@ -190,10 +192,23 @@ IOBUF PORT "sdram_dq[29]" IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_dq[30]" IO_TYPE=LVCMOS33;
 IOBUF PORT "sdram_dq[31]" IO_TYPE=LVCMOS33;
 
-## ---- I2S (directly on SODIMM GPIO pins) ----
-## SODIMM pin 41 = L2 (shared with LED on i9), use adjacent GPIOs
-## Using SODIMM pins 55-63 area for audio I/O
-## These assignments should be adjusted to match your ext-board wiring
+## ---- I2S / TDM (routed through SODIMM GPIO header) ----
+## All five pins are confirmed valid LFE5U-45F-6BG381C balls and appear in
+## the i9 v7.2 SODIMM GPIO map (Colorlight-FPGA-Projects):
+##    SODIMM 67 = T17  (mclk)
+##    SODIMM 61 = R17  (bclk)
+##    SODIMM 63 = P17  (lrck)
+##    SODIMM 75 = N17  (dout)
+##    SODIMM 65 = M17  (din)
+##
+## NOTE: SODIMM pin 41 (= L2) is shared with the on-board LED D2 - do NOT
+## use it for audio. The full GPIO pool exposed on SODIMM 41-156 includes:
+##   L2 R1 T1 U1 Y2 K18 C18 W1 V1 M1 T18 N2 R18 N3 R17 T2 P17 M3 M17 T3
+##   T17 R3 U18 N4 U17 M4 P18 L4 N17 L5 N18 P16 M18 J16 L20 J18 L18 J17
+##   K20 H18 K19 H17 J20 G18 J19 H16 H20 F18 G20 G16 G19 E18 F20 F17 F19
+##   F16 E20 E16 E19 E17 D20 D18 D19 D17 C20 G5 B20 D16 B19 F5 B18 E6
+##   A19 E5 C17 F4 A18 E4 D3 F1 C4 F3 B4 G3 C3 H3 E3 H4 A3 H5 C2 J4 B1 J5
+##   C1 K3 D2 K4 D1 K5 E2 B3 E1 A2 F2 B2
 LOCATE COMP "i2s_mclk" SITE "T17";
 LOCATE COMP "i2s_bclk" SITE "R17";
 LOCATE COMP "i2s_lrck" SITE "P17";
