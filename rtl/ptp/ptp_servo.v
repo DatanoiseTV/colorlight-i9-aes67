@@ -59,7 +59,17 @@ module ptp_servo (
     reg [7:0]         lock_counter;
     reg [7:0]         unlock_counter;
 
-    wire [63:0] abs_offset = offset_ns[63] ? (~offset_ns + 1) : offset_ns;
+    // Use the lower 32 bits of offset for lock detection. The upstream
+    // ptp_filter bypass_threshold (10 µs) keeps realistic values well
+    // within ±2.1 s, so truncation is safe.
+    wire signed [31:0] offset_lo  = offset_ns[31:0];
+    wire [31:0]        abs_offset = offset_lo[31] ? (~offset_lo + 1) : offset_lo;
+
+    // Register the absolute offset and run the lock state machine on the
+    // registered value next cycle. Breaks the offset_filt -> compare ->
+    // counter critical path.
+    reg [31:0] abs_offset_r;
+    reg        lock_eval;
 
     // 2-stage pipeline so the multiplies meet timing
     reg               s1_valid;
@@ -100,22 +110,31 @@ module ptp_servo (
             s2_p_term              <= 0;
             s2_i_term              <= 0;
             s2_valid               <= 0;
+            abs_offset_r           <= 0;
+            lock_eval              <= 0;
         end else begin
             freq_adj_valid   <= 0;
             phase_step_valid <= 0;
             s1_valid         <= 0;
             s2_valid         <= 0;
+            lock_eval        <= 0;
+
+            // Register abs_offset for next-cycle lock detection
+            if (offset_valid) begin
+                abs_offset_r <= abs_offset;
+                lock_eval    <= 1;
+            end
 
             if (offset_valid) begin
                 // Status low-pass for monitoring (separate from servo input)
                 offset_filtered_ns <= offset_filtered_ns +
-                    ((abs_offset[31:0] - offset_filtered_ns) >>> 3);
+                    ((abs_offset - offset_filtered_ns) >>> 3);
                 path_delay_filtered_ns <= path_delay_filtered_ns +
                     (path_delay_ns[31] ?
                         ((~path_delay_ns[31:0] + 1 - path_delay_filtered_ns) >>> 3) :
                         ((path_delay_ns[31:0] - path_delay_filtered_ns) >>> 3));
 
-                if (abs_offset > {32'd0, step_threshold}) begin
+                if (abs_offset > step_threshold) begin
                     // Large offset: phase step, reset integrator and lock SM
                     phase_step_ns    <= offset_ns[31:0];
                     phase_step_valid <= 1;
@@ -136,37 +155,46 @@ module ptp_servo (
                     s1_offset   <= offset_ns;
                     s1_integral <= integral + offset_ns;
 
-                    // Hysteretic lock state machine
-                    if (abs_offset < {32'd0, LOCKED_ENTER_NS}) begin
-                        if (lock_counter < 255) lock_counter <= lock_counter + 1;
-                        unlock_counter <= 0;
-                    end else if (abs_offset > {32'd0, UNLOCK_NS}) begin
-                        if (unlock_counter < 255) unlock_counter <= unlock_counter + 1;
-                        lock_counter <= 0;
-                    end
-
-                    case (lock_state)
-                        UNLOCKED:
-                            if (abs_offset < {32'd0, LOCK_ENTER_NS} && lock_counter >= 4)
-                                lock_state <= LOCKING;
-                        LOCKING: begin
-                            if (lock_counter >= 16)
-                                lock_state <= LOCKED;
-                            else if (unlock_counter >= 4)
-                                lock_state <= UNLOCKED;
-                        end
-                        LOCKED:
-                            if (abs_offset > {32'd0, LOCKED_EXIT_NS} || unlock_counter >= 8)
-                                lock_state <= LOCKING;
-                        default: lock_state <= UNLOCKED;
-                    endcase
                 end
             end
 
+            // Hysteretic lock state machine - runs one cycle after the
+            // offset arrives, on the registered abs_offset_r so its
+            // comparisons don't extend the offset path.
+            if (lock_eval) begin
+                if (abs_offset_r < LOCKED_ENTER_NS) begin
+                    if (lock_counter < 255) lock_counter <= lock_counter + 1;
+                    unlock_counter <= 0;
+                end else if (abs_offset_r > UNLOCK_NS) begin
+                    if (unlock_counter < 255) unlock_counter <= unlock_counter + 1;
+                    lock_counter <= 0;
+                end
+
+                case (lock_state)
+                    UNLOCKED:
+                        if (abs_offset_r < LOCK_ENTER_NS && lock_counter >= 4)
+                            lock_state <= LOCKING;
+                    LOCKING: begin
+                        if (lock_counter >= 16)
+                            lock_state <= LOCKED;
+                        else if (unlock_counter >= 4)
+                            lock_state <= UNLOCKED;
+                    end
+                    LOCKED:
+                        if (abs_offset_r > LOCKED_EXIT_NS || unlock_counter >= 8)
+                            lock_state <= LOCKING;
+                    default: lock_state <= UNLOCKED;
+                endcase
+            end
+
             // Pipeline stage 1: multiply
+            // Reduced to 32-bit signed × 16-bit unsigned to fit in two DSP
+            // slices and meet 125 MHz timing. Realistic offsets fit in 32
+            // signed bits (±2.1 s of nanoseconds) and Q1.15 gains have plenty
+            // of resolution.
             if (s1_valid) begin
-                s2_p_term <= (s1_offset   * $signed({32'b0, kp})) >>> 16;
-                s2_i_term <= (s1_integral * $signed({32'b0, ki})) >>> 16;
+                s2_p_term <= ($signed(s1_offset  [31:0]) * $signed({1'b0, kp[15:0]})) >>> 15;
+                s2_i_term <= ($signed(s1_integral[31:0]) * $signed({1'b0, ki[15:0]})) >>> 15;
                 s2_valid  <= 1;
             end
 

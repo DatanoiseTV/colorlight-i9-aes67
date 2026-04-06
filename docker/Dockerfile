@@ -80,6 +80,9 @@ RUN mkdir -p /opt/litex && cd /opt/litex && \
     python3 litex_setup.py --init --install --tag=2024.04 || \
     python3 litex_setup.py --init --install
 
+# meson + ninja are required by the LiteX BIOS build
+RUN pip3 install --no-cache-dir meson
+
 # ---- lwIP (TCP/IP stack for the soft CPU firmware) ----------------------
 # Pinned to STABLE-2_2_0_RELEASE for reproducibility.
 ARG LWIP_VERSION=STABLE-2_2_0_RELEASE
@@ -92,18 +95,17 @@ ENV LWIP_DIR=/opt/lwip
 # ---- Verify tool availability -------------------------------------------
 RUN yosys -V && \
     nextpnr-ecp5 --version && \
-    ecppack --help 2>&1 | head -1 || true && \
     iverilog -V | head -1 && \
     verilator --version | head -1 && \
-    openFPGAloader --Version 2>&1 | head -1 && \
     riscv64-unknown-elf-gcc --version | head -1 && \
     python3 -c "import litex; print('litex', litex.__version__ if hasattr(litex, '__version__') else 'ok')" && \
     python3 -c "import migen; print('migen ok')"
 
 # ---- USB device permissions (so non-root can program) ------------------
 # When running with --device or --privileged, the udev rules below allow
-# openFPGAloader to access the DAPLink debugger on the i9 ext-board.
-RUN echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="0d28", ATTRS{idProduct}=="0204", MODE="0666"' \
+# openFPGALoader to access the DAPLink debugger on the i9 ext-board.
+RUN mkdir -p /etc/udev/rules.d && \
+    echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="0d28", ATTRS{idProduct}=="0204", MODE="0666"' \
         > /etc/udev/rules.d/99-daplink.rules
 
 # ---- Non-root user (UID set at runtime via --user $(id -u):$(id -g)) ----

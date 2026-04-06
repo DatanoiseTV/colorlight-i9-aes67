@@ -194,11 +194,11 @@ IOBUF PORT "sdram_dq[31]" IO_TYPE=LVCMOS33;
 ## SODIMM pin 41 = L2 (shared with LED on i9), use adjacent GPIOs
 ## Using SODIMM pins 55-63 area for audio I/O
 ## These assignments should be adjusted to match your ext-board wiring
-LOCATE COMP "i2s_mclk" SITE "F15";
-LOCATE COMP "i2s_bclk" SITE "E17";
-LOCATE COMP "i2s_lrck" SITE "F17";
-LOCATE COMP "i2s_dout" SITE "G18";
-LOCATE COMP "i2s_din"  SITE "H17";
+LOCATE COMP "i2s_mclk" SITE "T17";
+LOCATE COMP "i2s_bclk" SITE "R17";
+LOCATE COMP "i2s_lrck" SITE "P17";
+LOCATE COMP "i2s_dout" SITE "N17";
+LOCATE COMP "i2s_din"  SITE "M17";
 
 IOBUF PORT "i2s_mclk" IO_TYPE=LVCMOS33;
 IOBUF PORT "i2s_bclk" IO_TYPE=LVCMOS33;

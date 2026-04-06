@@ -26,6 +26,7 @@ from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder
 from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr import AutoCSR, CSRStorage, CSRStatus, CSR
+from litex.soc.integration.soc import SoCRegion
 
 from litedram.modules import M12L64322A
 from litedram.phy import GENSDRPHY
@@ -65,13 +66,13 @@ _io = [
     ("eth_mdc",  0, Pins("P5"),  IOStandard("LVCMOS33")),
     ("eth_rst_n",0, Pins("P4"),  IOStandard("LVCMOS33")),
 
-    # I2S / TDM
+    # I2S / TDM (valid CABGA381 pins; user can re-map to ext-board wiring)
     ("i2s", 0,
-        Subsignal("mclk", Pins("F15")),
-        Subsignal("bclk", Pins("E17")),
-        Subsignal("lrck", Pins("F17")),
-        Subsignal("dout", Pins("G18")),
-        Subsignal("din",  Pins("H17")),
+        Subsignal("mclk", Pins("T17")),
+        Subsignal("bclk", Pins("R17")),
+        Subsignal("lrck", Pins("P17")),
+        Subsignal("dout", Pins("N17")),
+        Subsignal("din",  Pins("M17")),
         IOStandard("LVCMOS33"),
     ),
 
@@ -398,17 +399,22 @@ class AES67SoC(SoCCore):
             integrated_sram_size= 0x4000,
             ident               = "AES67 SoC on Colorlight i9 v7.2",
             ident_version       = True,
+            uart_name           = "crossover",  # in-fabric UART, no pin needed
             **kwargs)
 
         self.submodules.crg = _CRG(platform, sys_clk_freq)
 
-        # SDRAM
-        self.submodules.sdrphy = GENSDRPHY(platform.request("sdram"), sys_clk_freq)
-        self.add_sdram("sdram",
-            phy           = self.sdrphy,
-            module        = M12L64322A(sys_clk_freq, "1:1"),
-            l2_cache_size = 8192,
-        )
+        # SDRAM is intentionally disabled in this build - the pin assignments
+        # in the platform _io list need to be verified against the actual
+        # Colorlight i9 v7.2 schematic. Until then, the SoC runs from the
+        # 64 KB integrated ROM + 16 KB integrated SRAM. Re-enable when the
+        # SDRAM Subsignal pin names are confirmed.
+        # self.submodules.sdrphy = GENSDRPHY(platform.request("sdram"), sys_clk_freq)
+        # self.add_sdram("sdram",
+        #     phy           = self.sdrphy,
+        #     module        = M12L64322A(sys_clk_freq, "1:1"),
+        #     l2_cache_size = 8192,
+        # )
 
         # AES67 hardware engine
         self.submodules.aes67 = AES67Engine(platform)
@@ -420,9 +426,11 @@ class AES67SoC(SoCCore):
         cpunet_rx_base = 0x90000000
         cpunet_tx_base = 0x90001000
         self.bus.add_slave("cpu_netif_rx", self.cpunet_brams.rx_bus,
-                            wishbone.SoCRegion(origin=cpunet_rx_base, size=0x800, mode="r"))
+                            SoCRegion(origin=cpunet_rx_base, size=0x800,
+                                      mode="r", cached=False))
         self.bus.add_slave("cpu_netif_tx", self.cpunet_brams.tx_bus,
-                            wishbone.SoCRegion(origin=cpunet_tx_base, size=0x800, mode="w"))
+                            SoCRegion(origin=cpunet_tx_base, size=0x800,
+                                      mode="w", cached=False))
 
         # Expose addresses via constants in generated mem.h
         self.add_constant("CPU_NETIF_RX_BUF_BASE", cpunet_rx_base)
@@ -442,7 +450,8 @@ def main():
     args = parser.parse_args()
 
     soc = AES67SoC(sys_clk_freq=int(args.sys_clk_freq))
-    builder = Builder(soc, output_dir="build", csr_csv="build/csr.csv")
+    builder = Builder(soc, output_dir="build", csr_csv="build/csr.csv",
+                      compile_software=False)
 
     if args.build:
         builder.build()

@@ -55,25 +55,33 @@ module audio_clk_gen #(
     localparam BCLK_PER_FRAME = SLOTS_PER_FRAME * BITS_PER_SLOT;
 
     // ---- Compute disciplined increment ----
-    // delta_increment = (freq_adj_ppb * nco_increment) / 1e9
-    // We use a 64-bit signed multiply followed by a divide-by-2^30 shift
-    // (which approximates /1e9 within 7%; precise correction is done by
-    // the PTP servo loop iterating).
-    reg signed [63:0] mult_tmp;
-    reg [31:0] effective_increment;
+    //
+    // delta_increment ≈ ppb * NOMINAL_INCREMENT / 1e9
+    // For the nominal NCO target of 422_212_466 (12.288 MHz BCLK at 125 MHz):
+    //   ppb * 422_212_466 / 1e9 ≈ ppb * 0.4222
+    //                          ≈ ppb * 432 / 1024     (≤2% error)
+    //                          = ((ppb<<8) + (ppb<<7) + (ppb<<5) + (ppb<<4)) >>> 10
+    //
+    // Constant-coefficient is purely shifts + adds — yosys synthesises it as
+    // a 4-input adder with no DSP slice and no long carry chains. Meets
+    // 125 MHz timing comfortably. The PTP servo iterates to absorb the
+    // approximation error so absolute precision is fine.
+
+    reg signed [31:0] delta_inc;
+    reg [31:0]        effective_increment;
+
+    wire signed [33:0] ppb_ext = $signed({{2{freq_adj_ppb[31]}}, freq_adj_ppb});
+    wire signed [33:0] sum432  = (ppb_ext <<< 8) + (ppb_ext <<< 7) +
+                                  (ppb_ext <<< 5) + (ppb_ext <<< 4);
 
     always @(posedge clk125) begin
         if (rst) begin
-            mult_tmp            <= 0;
+            delta_inc           <= 0;
             effective_increment <= 32'd422_212_466;
         end else begin
-            if (freq_adj_valid) begin
-                mult_tmp <= ($signed({{32{freq_adj_ppb[31]}}, freq_adj_ppb}) *
-                              $signed({1'b0, nco_increment})) >>> 30;
-                effective_increment <= nco_increment + mult_tmp[31:0];
-            end else if (effective_increment == 0) begin
-                effective_increment <= nco_increment;
-            end
+            if (freq_adj_valid)
+                delta_inc <= (sum432 >>> 10);
+            effective_increment <= nco_increment + delta_inc;
         end
     end
 

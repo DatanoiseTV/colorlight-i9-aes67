@@ -87,29 +87,44 @@ module ptp_timestamp (
         end
     endfunction
 
-    wire [79:0] live_ts        = {ts_sec, ts_nsec};
-    wire [79:0] tx_ts_corrected = apply_delay(live_ts,  tx_delay_ns);
-    wire [79:0] rx_ts_corrected = apply_delay(live_ts, rx_delay_ns);
-
-    // Capture register: latch the corrected timestamp on the SFD pulse.
-    // Because the function evaluates combinationally, the value latched
-    // is the same-cycle PTP time corrected for the configured delay.
+    // ---- Pipelined apply_delay to break the combinational chain ----
+    // Stage 1: continuously compute the corrected timestamps into a reg.
+    // Stage 2: on SFD pulse, latch the registered value into the capture.
+    // This avoids a long combinational path from ptp_clock through apply_delay
+    // straight into the capture register (which would fail 125 MHz timing).
+    reg [79:0] tx_ts_corrected_r;
+    reg [79:0] rx_ts_corrected_r;
     reg [79:0] tx_capture;
     reg        tx_capture_valid;
     reg [79:0] rx_capture;
     reg        rx_capture_valid;
+    reg        tx_sfd_d;
+    reg        rx_sfd_d;
 
     always @(posedge clk) begin
         if (rst) begin
-            tx_capture       <= 80'd0;
-            tx_capture_valid <= 1'b0;
-            rx_capture       <= 80'd0;
-            rx_capture_valid <= 1'b0;
+            tx_ts_corrected_r <= 80'd0;
+            rx_ts_corrected_r <= 80'd0;
+            tx_capture        <= 80'd0;
+            rx_capture        <= 80'd0;
+            tx_capture_valid  <= 1'b0;
+            rx_capture_valid  <= 1'b0;
+            tx_sfd_d          <= 1'b0;
+            rx_sfd_d          <= 1'b0;
         end else begin
-            tx_capture_valid <= tx_sfd_pulse;
-            rx_capture_valid <= rx_sfd_pulse;
-            if (tx_sfd_pulse) tx_capture <= tx_ts_corrected;
-            if (rx_sfd_pulse) rx_capture <= rx_ts_corrected;
+            // Stage 1: compute the corrected live timestamp (registered)
+            tx_ts_corrected_r <= apply_delay({ts_sec, ts_nsec}, tx_delay_ns);
+            rx_ts_corrected_r <= apply_delay({ts_sec, ts_nsec}, rx_delay_ns);
+
+            // Delay the SFD pulse by 1 cycle to align with the registered ts
+            tx_sfd_d <= tx_sfd_pulse;
+            rx_sfd_d <= rx_sfd_pulse;
+
+            // Stage 2: latch the registered corrected ts on the (delayed) SFD
+            tx_capture_valid <= tx_sfd_d;
+            rx_capture_valid <= rx_sfd_d;
+            if (tx_sfd_d) tx_capture <= tx_ts_corrected_r;
+            if (rx_sfd_d) rx_capture <= rx_ts_corrected_r;
         end
     end
 

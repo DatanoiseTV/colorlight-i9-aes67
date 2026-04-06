@@ -70,16 +70,44 @@ module audio_dsp #(
         end
     end
 
-    // ---- Combinational gain + mute ----
-    // signed 24 × unsigned 16 = signed 40, then shift right by 15 to get
-    // back the audio LSB (Q1.15 unity = 0x7FFF).
-    wire signed [39:0] product = $signed(audio_in) * $signed({1'b0, gain[audio_ch]});
-    wire signed [24:0] scaled  = product[39:15];
-    // Saturate to 24-bit signed
-    wire [23:0] sat = (scaled > 25'sd8388607)  ? 24'h7FFFFF :
-                      (scaled < -25'sd8388608) ? 24'h800000 :
-                                                  scaled[23:0];
-    assign audio_out = mute[audio_ch] ? 24'd0 : sat;
+    // ---- 1-cycle pipeline so the multiply meets 125 MHz ----
+    // Stage 1: latch input + selected gain/mute
+    reg signed [23:0] s1_in;
+    reg [15:0]        s1_gain;
+    reg               s1_mute;
+
+    // Stage 2: registered product (Q1.15 multiply)
+    reg signed [39:0] s2_product;
+    reg               s2_mute;
+
+    // Stage 3: registered output (saturate + mute)
+    reg [23:0] audio_out_r;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            s1_in     <= 0;
+            s1_gain   <= 0;
+            s1_mute   <= 0;
+            s2_product <= 0;
+            s2_mute    <= 0;
+            audio_out_r <= 0;
+        end else begin
+            s1_in   <= audio_in;
+            s1_gain <= gain[audio_ch];
+            s1_mute <= mute[audio_ch];
+            s2_product <= s1_in * $signed({1'b0, s1_gain});
+            s2_mute    <= s1_mute;
+            // Saturate to 24-bit signed
+            if (s2_product[39:38] == 2'b01)
+                audio_out_r <= 24'h7FFFFF;
+            else if (s2_product[39:38] == 2'b10)
+                audio_out_r <= 24'h800000;
+            else
+                audio_out_r <= s2_mute ? 24'd0 : s2_product[38:15];
+        end
+    end
+
+    assign audio_out = audio_out_r;
 
     // ---- Peak meter ----
     wire [23:0] abs_in = audio_in[23] ? (~audio_in + 1) : audio_in;

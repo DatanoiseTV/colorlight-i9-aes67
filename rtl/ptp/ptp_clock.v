@@ -53,7 +53,28 @@ module ptp_clock (
             incr_reg <= increment;
     end
 
-    // Main clock accumulator
+    // ---- Pre-register the phase adjustment to break long combinational paths ----
+    // The servo can fire phase steps a few times per second; a 1-cycle latency
+    // is irrelevant. Registering here lets the phase-adjust math have its own
+    // dedicated path that doesn't cascade with the always-on accumulator.
+    reg signed [33:0] phase_step_pre;
+    reg               phase_step_pre_valid;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            phase_step_pre       <= 0;
+            phase_step_pre_valid <= 0;
+        end else begin
+            phase_step_pre_valid <= phase_adj_en;
+            // Pre-add the nanosecond field to the requested offset.
+            // 34-bit signed result captures any (sub-second) carry/borrow.
+            phase_step_pre <= $signed({2'b00, ts_nsec}) +
+                              $signed({{2{phase_adj_ns[31]}}, phase_adj_ns});
+        end
+    end
+
+    // Main clock accumulator (single signed-add data path; rollover handled
+    // by a dedicated case rather than chained ifs).
     always @(posedge clk) begin
         if (rst) begin
             ts_sec  <= 48'd0;
@@ -63,37 +84,29 @@ module ptp_clock (
         end else begin
             pps <= 1'b0;
 
-            // Set seconds (from CPU or PTP master)
             if (sec_set_en) begin
                 ts_sec <= sec_set_val;
             end
 
-            // Phase adjustment (one-shot correction)
-            if (phase_adj_en) begin
-                // Apply signed offset to nanoseconds
-                if (phase_adj_ns[31]) begin
-                    // Negative offset
-                    if (ts_nsec < (~phase_adj_ns + 1)) begin
-                        // Borrow from seconds
-                        ts_nsec <= NS_PER_SEC - (~phase_adj_ns + 1) + ts_nsec;
-                        ts_sec  <= ts_sec - 1;
-                    end else begin
-                        ts_nsec <= ts_nsec + phase_adj_ns; // add negative = subtract
-                    end
+            if (phase_step_pre_valid) begin
+                // Phase step: result already pre-computed (signed 34-bit)
+                if (phase_step_pre >= $signed({2'b00, NS_PER_SEC})) begin
+                    ts_nsec <= phase_step_pre - NS_PER_SEC;
+                    ts_sec  <= ts_sec + 1;
+                end else if (phase_step_pre < 0) begin
+                    ts_nsec <= phase_step_pre + NS_PER_SEC;
+                    ts_sec  <= ts_sec - 1;
                 end else begin
-                    // Positive offset
-                    ts_nsec <= ts_nsec + phase_adj_ns;
+                    ts_nsec <= phase_step_pre[31:0];
                 end
             end else begin
-                // Normal increment
+                // Normal accumulator path
                 {ts_nsec, ts_frac} <= {ts_nsec, ts_frac} + {32'd0, incr_reg};
-            end
-
-            // Second rollover
-            if (ts_nsec >= NS_PER_SEC) begin
-                ts_nsec <= ts_nsec - NS_PER_SEC;
-                ts_sec  <= ts_sec + 1;
-                pps     <= 1'b1;
+                if (ts_nsec + (incr_reg[31:24]) >= NS_PER_SEC) begin
+                    ts_nsec <= ts_nsec + incr_reg[31:24] - NS_PER_SEC;
+                    ts_sec  <= ts_sec + 1;
+                    pps     <= 1'b1;
+                end
             end
         end
     end
