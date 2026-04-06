@@ -127,12 +127,21 @@ static void api_status(httpd_conn_t *c, http_method_t m, const char *p,
     n = j_kv_u(jp, rem, "sync_count", aes67_ptp_sync_count_read(), 1);
     jp += n; rem -= n;
 
-    n = snprintf(jp, rem, "},\"rtp\":{"); jp += n; rem -= n;
+    n = snprintf(jp, rem, "},\"rtp\":["); jp += n; rem -= n;
+    // Stream 0
+    n = snprintf(jp, rem, "{");                                              jp += n; rem -= n;
     n = j_kv_u(jp, rem, "rx",         aes67_rtp_packets_rx_read(), 0); jp += n; rem -= n;
     n = j_kv_u(jp, rem, "tx",         aes67_rtp_packets_tx_read(), 0); jp += n; rem -= n;
     n = j_kv_u(jp, rem, "seq_errors", aes67_rtp_seq_errors_read(), 0); jp += n; rem -= n;
     n = j_kv_u(jp, rem, "jbuf_depth", aes67_jbuf_depth_read(),     1); jp += n; rem -= n;
-    n = snprintf(jp, rem, "}}");
+    n = snprintf(jp, rem, "},");                                             jp += n; rem -= n;
+    // Stream 1
+    n = snprintf(jp, rem, "{");                                              jp += n; rem -= n;
+    n = j_kv_u(jp, rem, "rx",         aes67_rtp_packets_rx_1_read(), 0); jp += n; rem -= n;
+    n = j_kv_u(jp, rem, "tx",         aes67_rtp_packets_tx_1_read(), 0); jp += n; rem -= n;
+    n = j_kv_u(jp, rem, "seq_errors", aes67_rtp_seq_errors_1_read(), 0); jp += n; rem -= n;
+    n = j_kv_u(jp, rem, "jbuf_depth", aes67_jbuf_depth_1_read(),     1); jp += n; rem -= n;
+    n = snprintf(jp, rem, "}]}");
 
     httpd_send_json(c, s_json);
 }
@@ -247,6 +256,58 @@ static void api_bmc(httpd_conn_t *c, http_method_t m, const char *p,
     httpd_send_json(c, s_json);
 }
 
+// ---- /api/mdio - read or write a PHY register -----------------------------
+// GET  /api/mdio?phy=N&reg=M           - read PHY N register M
+// POST /api/mdio  {"phy":N,"reg":M,"data":V}
+static uint16_t mdio_read(uint8_t phy, uint8_t reg)
+{
+    aes67_mdio_phy_addr_write(phy & 0x1F);
+    aes67_mdio_reg_addr_write(reg & 0x1F);
+    aes67_mdio_op_read_write(1);
+    aes67_mdio_start_write(1);
+    while (aes67_mdio_busy_read())
+        ;
+    return aes67_mdio_read_data_read();
+}
+
+static void mdio_write(uint8_t phy, uint8_t reg, uint16_t data)
+{
+    aes67_mdio_phy_addr_write(phy & 0x1F);
+    aes67_mdio_reg_addr_write(reg & 0x1F);
+    aes67_mdio_write_data_write(data);
+    aes67_mdio_op_read_write(0);
+    aes67_mdio_start_write(1);
+    while (aes67_mdio_busy_read())
+        ;
+}
+
+static void api_mdio(httpd_conn_t *c, http_method_t m, const char *p,
+                      const char *q, const uint8_t *b, size_t bl)
+{
+    (void)p;
+    if (m == HTTP_GET) {
+        uint32_t phy = httpd_query_get_uint(q, "phy", 0);
+        uint32_t reg = httpd_query_get_uint(q, "reg", 0);
+        uint16_t v   = mdio_read(phy, reg);
+        snprintf(s_json, sizeof(s_json),
+                 "{\"phy\":%lu,\"reg\":%lu,\"data\":%u}",
+                 (unsigned long)phy, (unsigned long)reg, v);
+        httpd_send_json(c, s_json);
+    } else if (m == HTTP_POST) {
+        uint64_t phy, reg, data;
+        if (json_get_uint(b, bl, "phy",  &phy) &&
+            json_get_uint(b, bl, "reg",  &reg) &&
+            json_get_uint(b, bl, "data", &data)) {
+            mdio_write(phy, reg, data);
+            httpd_send_json(c, "{\"ok\":true}");
+        } else {
+            httpd_send_json(c, "{\"ok\":false}");
+        }
+    } else {
+        httpd_send_404(c);
+    }
+}
+
 // ---- /api/dsp -------------------------------------------------------------
 static void api_dsp_get(httpd_conn_t *c)
 {
@@ -305,4 +366,5 @@ void api_register_routes(void)
     httpd_lite_route("/api/sap",    api_sap);
     httpd_lite_route("/api/bmc",    api_bmc);
     httpd_lite_route("/api/dsp",    api_dsp);
+    httpd_lite_route("/api/mdio",   api_mdio);
 }

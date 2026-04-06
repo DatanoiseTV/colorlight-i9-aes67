@@ -32,6 +32,8 @@ RTL_SRCS  = \
     rtl/eth/ip_checksum.v \
     rtl/eth/tx_udp_wrapper.v \
     rtl/eth/tx_arbiter.v \
+    rtl/eth/tx_arbiter2.v \
+    rtl/eth/mdio_master.v \
     rtl/ptp/ptp_clock.v \
     rtl/ptp/ptp_timestamp.v \
     rtl/ptp/ptp_filter.v \
@@ -42,6 +44,8 @@ RTL_SRCS  = \
     rtl/rtp/rtp_tx.v \
     rtl/rtp/jitter_buffer.v \
     rtl/rtp/rtp_engine.v \
+    rtl/rtp/rtp_stream_router.v \
+    rtl/rtp/rtp_multistream.v \
     rtl/audio/audio_clk_gen.v \
     rtl/audio/i2s_tdm_master.v \
     rtl/audio/virt_tdm16.v \

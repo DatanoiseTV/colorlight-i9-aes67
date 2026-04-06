@@ -331,12 +331,20 @@ Implemented and wired together:
 - lwIP + DHCP + ARP + ICMP + IGMP + mDNS + HTTP
 - Docker toolchain (Linux/macOS/Windows)
 
-Known not-yet-done:
-- PTP **grandmaster** mode (only slave is wired up; Announce/Sync gen is
-  the next addition to `ptp_pp.v`)
+Implemented and integrated in the latest build:
+- **PTP grandmaster** + slave (`ptp_pp.v` handles Sync, Follow_Up, Delay_Req,
+  Delay_Resp generation; mode flips via `mode_is_master` CSR; BMC algorithm
+  in firmware drives the role decision)
+- **MDIO master** (`mdio_master.v` Clause 22 state machine, CSR-driven)
+  — the CPU can read PHY link status, configure autonegotiation, etc.
+- **Multi-stream RTP** (`rtp_multistream.v` wraps NUM_STREAMS = 2 engines;
+  each stream owns CHANNELS_PER_STREAM = 4 of the 8 TDM slots; per-stream
+  TX wrappers + a 2-way arbiter merge into the top-level RTP TX path)
+
+Still on the to-do list:
 - PHY 1 currently tied off — bring up for redundancy / second network
-- MDIO management driven from CPU (currently tied off)
-- Multi-stream RTP (one stream per `rtp_engine` instance today)
+- Re-enable SDRAM in the LiteX build once the actual i9 v7.2 SDRAM pin
+  names are confirmed against the schematic
 
 ## License
 

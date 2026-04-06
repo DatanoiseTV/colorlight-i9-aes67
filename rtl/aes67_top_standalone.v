@@ -102,6 +102,8 @@ module aes67_top_standalone (
         .cfg_step_threshold_ns  (32'd1000),
         .cfg_tx_ssrc            (32'hDEADBEEF),
         .cfg_rx_expected_ssrc   (32'd0),
+        .cfg_tx_ssrc_1          (32'hCAFEBABE),
+        .cfg_rx_expected_ssrc_1 (32'd0),
         .cfg_payload_type       (7'd98),
         .cfg_num_channels       (4'd2),
         .cfg_samples_per_pkt    (11'd6),
@@ -168,7 +170,22 @@ module aes67_top_standalone (
         .cap_rd         (1'b0),
         .cap_rd_data    (cap_rd_data_w),
         .cap_empty      (cap_empty_w),
-        .cap_overflow   (cap_overflow_w)
+        .cap_overflow   (cap_overflow_w),
+
+        // ---- MDIO (idle) ----
+        .mdio_cmd_start        (1'b0),
+        .mdio_cmd_op_read      (1'b1),
+        .mdio_cmd_phy_addr     (5'd0),
+        .mdio_cmd_reg_addr     (5'd0),
+        .mdio_cmd_write_data   (16'd0),
+        .mdio_read_data        (),
+        .mdio_busy             (),
+
+        // ---- Multi-stream stats (no-connect) ----
+        .stat_rtp_packets_rx_1 (),
+        .stat_rtp_packets_tx_1 (),
+        .stat_rtp_seq_errors_1 (),
+        .stat_jbuf_depth_1     ()
     );
 
 endmodule

@@ -65,6 +65,8 @@ module aes67_top (
     input  wire [31:0] cfg_step_threshold_ns,
     input  wire [31:0] cfg_tx_ssrc,
     input  wire [31:0] cfg_rx_expected_ssrc,
+    input  wire [31:0] cfg_tx_ssrc_1,        // stream 1
+    input  wire [31:0] cfg_rx_expected_ssrc_1,
     input  wire [6:0]  cfg_payload_type,
     input  wire [3:0]  cfg_num_channels,
     input  wire [10:0] cfg_samples_per_pkt,
@@ -131,7 +133,22 @@ module aes67_top (
     input  wire        cap_rd,
     output wire [19:0] cap_rd_data,
     output wire        cap_empty,
-    output wire        cap_overflow
+    output wire        cap_overflow,
+
+    // ---- MDIO management (CPU controls PHY registers) ----
+    input  wire        mdio_cmd_start,
+    input  wire        mdio_cmd_op_read,
+    input  wire [4:0]  mdio_cmd_phy_addr,
+    input  wire [4:0]  mdio_cmd_reg_addr,
+    input  wire [15:0] mdio_cmd_write_data,
+    output wire [15:0] mdio_read_data,
+    output wire        mdio_busy,
+
+    // ---- Multi-stream RTP stats (stream 1; stream 0 reuses existing stat_*) ----
+    output wire [31:0] stat_rtp_packets_rx_1,
+    output wire [31:0] stat_rtp_packets_tx_1,
+    output wire [31:0] stat_rtp_seq_errors_1,
+    output wire [10:0] stat_jbuf_depth_1
 );
 
     // ---- Clock generation ----
@@ -398,35 +415,52 @@ module aes67_top (
         .audio_rx_tick    (tdm_rx_wr)
     );
 
-    // ---- RTP Engine ----
+    // ---- Multi-Stream RTP Engine (NUM_STREAMS independent streams) ----
+    localparam NUM_STREAMS         = 2;
+    localparam CHANNELS_PER_STREAM = 4;   // 2 streams × 4ch = 8 TDM slots
+
     wire [7:0] rtp_rx_tdata;
     wire       rtp_rx_tvalid, rtp_rx_tlast, rtp_rx_tready;
-    wire [7:0] rtp_payload_tdata;
-    wire       rtp_payload_tvalid, rtp_payload_tlast, rtp_payload_tready;
 
-    rtp_engine #(
-        .SAMPLE_WIDTH(24),
-        .NUM_CHANNELS(8),
-        .JBUF_ADDR_W (10)
-    ) u_rtp (
+    // Per-stream TX UDP payload outputs (flattened bus)
+    wire [NUM_STREAMS*8-1:0] ms_tx_tdata;
+    wire [NUM_STREAMS-1:0]   ms_tx_tvalid, ms_tx_tlast, ms_tx_tready;
+
+    // Pack the per-stream config into the flat buses rtp_multistream expects
+    wire [NUM_STREAMS*32-1:0] ms_tx_ssrc       = {cfg_tx_ssrc_1,        cfg_tx_ssrc};
+    wire [NUM_STREAMS*32-1:0] ms_rx_ssrc       = {cfg_rx_expected_ssrc_1,cfg_rx_expected_ssrc};
+    wire [NUM_STREAMS*7-1:0]  ms_payload_type  = {cfg_payload_type, cfg_payload_type};
+    wire [NUM_STREAMS*4-1:0]  ms_num_channels  = {cfg_num_channels, cfg_num_channels};
+    wire [NUM_STREAMS*11-1:0] ms_spp           = {cfg_samples_per_pkt, cfg_samples_per_pkt};
+    wire [NUM_STREAMS*10-1:0] ms_jbuf_depth    = {cfg_jbuf_target_depth, cfg_jbuf_target_depth};
+
+    wire [NUM_STREAMS*32-1:0] ms_rx_packets, ms_tx_packets, ms_seq_err;
+    wire [NUM_STREAMS*11-1:0] ms_jbuf_d;
+
+    rtp_multistream #(
+        .NUM_STREAMS         (NUM_STREAMS),
+        .SAMPLE_WIDTH        (24),
+        .CHANNELS_PER_STREAM (CHANNELS_PER_STREAM),
+        .JBUF_ADDR_W         (10)
+    ) u_rtp_ms (
         .clk                  (clk125),
         .rst                  (rst),
-        .rx_enable            (1'b1),
-        .tx_enable            (1'b1),
-        .tx_ssrc              (cfg_tx_ssrc),
-        .rx_expected_ssrc     (cfg_rx_expected_ssrc),
-        .payload_type         (cfg_payload_type),
-        .num_channels         (cfg_num_channels),
-        .samples_per_packet   (cfg_samples_per_pkt),
-        .jbuf_target_depth    (cfg_jbuf_target_depth),
+        .rx_enable            ({NUM_STREAMS{1'b1}}),
+        .tx_enable            ({NUM_STREAMS{1'b1}}),
+        .tx_ssrc              (ms_tx_ssrc),
+        .rx_expected_ssrc     (ms_rx_ssrc),
+        .payload_type         (ms_payload_type),
+        .num_channels         (ms_num_channels),
+        .samples_per_packet   (ms_spp),
+        .jbuf_target_depth    (ms_jbuf_depth),
         .rx_axis_tdata        (rtp_rx_tdata),
         .rx_axis_tvalid       (rtp_rx_tvalid),
         .rx_axis_tlast        (rtp_rx_tlast),
         .rx_axis_tready       (rtp_rx_tready),
-        .tx_axis_tdata        (rtp_payload_tdata),
-        .tx_axis_tvalid       (rtp_payload_tvalid),
-        .tx_axis_tlast        (rtp_payload_tlast),
-        .tx_axis_tready       (rtp_payload_tready),
+        .tx_axis_tdata        (ms_tx_tdata),
+        .tx_axis_tvalid       (ms_tx_tvalid),
+        .tx_axis_tlast        (ms_tx_tlast),
+        .tx_axis_tready       (ms_tx_tready),
         .audio_rd_ch          (tdm_tx_slot),
         .audio_rd_en          (tdm_tx_rd),
         .audio_rd_data        (tdm_tx_sample_rtp),
@@ -435,32 +469,40 @@ module aes67_top (
         .audio_wr_en          (tdm_rx_wr),
         .send_packet_tick     (frame_tick),
         .rtp_timestamp        (rtp_sample_counter),
-        .rx_packets_received  (stat_rtp_packets_rx),
-        .rx_packets_dropped   (),
-        .rx_seq_errors        (stat_rtp_seq_errors),
-        .tx_packets_sent      (stat_rtp_packets_tx),
-        .jbuf_depth           (stat_jbuf_depth),
-        .jbuf_underrun        (),
-        .jbuf_overrun         ()
+        .rx_packets_received  (ms_rx_packets),
+        .tx_packets_sent      (ms_tx_packets),
+        .rx_seq_errors        (ms_seq_err),
+        .jbuf_depth           (ms_jbuf_d)
     );
 
-    // RTP TX wrapper: prepend Eth/IP/UDP headers
-    wire [7:0] rtp_eth_tdata;
-    wire       rtp_eth_tvalid, rtp_eth_tlast, rtp_eth_tready;
-    wire       rtp_wrap_busy;
-    reg        rtp_start;
+    assign stat_rtp_packets_rx   = ms_rx_packets[0*32 +: 32];
+    assign stat_rtp_packets_tx   = ms_tx_packets[0*32 +: 32];
+    assign stat_rtp_seq_errors   = ms_seq_err   [0*32 +: 32];
+    assign stat_jbuf_depth       = ms_jbuf_d    [0*11 +: 11];
+    assign stat_rtp_packets_rx_1 = ms_rx_packets[1*32 +: 32];
+    assign stat_rtp_packets_tx_1 = ms_tx_packets[1*32 +: 32];
+    assign stat_rtp_seq_errors_1 = ms_seq_err   [1*32 +: 32];
+    assign stat_jbuf_depth_1     = ms_jbuf_d    [1*11 +: 11];
 
-    // Compute payload length: 12 (RTP header) + samples_per_pkt * num_channels * 3 (L24)
+    // ---- Per-stream TX wrappers (Eth/IP/UDP header prepend) ----
+    wire [7:0] rtp0_eth_tdata, rtp1_eth_tdata;
+    wire       rtp0_eth_tvalid, rtp0_eth_tlast, rtp0_eth_tready;
+    wire       rtp1_eth_tvalid, rtp1_eth_tlast, rtp1_eth_tready;
+    wire       rtp0_wrap_busy, rtp1_wrap_busy;
+    reg        rtp0_start, rtp1_start;
+
     wire [15:0] rtp_payload_len =
         16'd12 + ({5'd0, cfg_samples_per_pkt} * {12'd0, cfg_num_channels} * 16'd3);
 
-    always @(posedge clk125)
-        rtp_start <= rtp_payload_tvalid & ~rtp_wrap_busy & ~rtp_start;
+    always @(posedge clk125) begin
+        rtp0_start <= ms_tx_tvalid[0] & ~rtp0_wrap_busy & ~rtp0_start;
+        rtp1_start <= ms_tx_tvalid[1] & ~rtp1_wrap_busy & ~rtp1_start;
+    end
 
-    tx_udp_wrapper u_rtp_wrap (
+    tx_udp_wrapper u_rtp_wrap0 (
         .clk             (clk125),
         .rst             (rst),
-        .start           (rtp_start),
+        .start           (rtp0_start),
         .payload_len     (rtp_payload_len),
         .dst_mac         (cfg_rtp_dst_mac),
         .src_mac         (cfg_local_mac),
@@ -468,15 +510,58 @@ module aes67_top (
         .src_ip          (cfg_local_ip),
         .dst_port        (cfg_rtp_port),
         .src_port        (cfg_rtp_port),
-        .busy            (rtp_wrap_busy),
-        .pl_axis_tdata   (rtp_payload_tdata),
-        .pl_axis_tvalid  (rtp_payload_tvalid),
-        .pl_axis_tlast   (rtp_payload_tlast),
-        .pl_axis_tready  (rtp_payload_tready),
-        .mac_axis_tdata  (rtp_eth_tdata),
-        .mac_axis_tvalid (rtp_eth_tvalid),
-        .mac_axis_tlast  (rtp_eth_tlast),
-        .mac_axis_tready (rtp_eth_tready)
+        .busy            (rtp0_wrap_busy),
+        .pl_axis_tdata   (ms_tx_tdata[0*8 +: 8]),
+        .pl_axis_tvalid  (ms_tx_tvalid[0]),
+        .pl_axis_tlast   (ms_tx_tlast[0]),
+        .pl_axis_tready  (ms_tx_tready[0]),
+        .mac_axis_tdata  (rtp0_eth_tdata),
+        .mac_axis_tvalid (rtp0_eth_tvalid),
+        .mac_axis_tlast  (rtp0_eth_tlast),
+        .mac_axis_tready (rtp0_eth_tready)
+    );
+
+    tx_udp_wrapper u_rtp_wrap1 (
+        .clk             (clk125),
+        .rst             (rst),
+        .start           (rtp1_start),
+        .payload_len     (rtp_payload_len),
+        .dst_mac         (cfg_rtp_dst_mac),
+        .src_mac         (cfg_local_mac),
+        .dst_ip          (cfg_rtp_mcast_ip),
+        .src_ip          (cfg_local_ip),
+        .dst_port        (cfg_rtp_port + 16'd2),    // stream 1 on next port
+        .src_port        (cfg_rtp_port + 16'd2),
+        .busy            (rtp1_wrap_busy),
+        .pl_axis_tdata   (ms_tx_tdata[1*8 +: 8]),
+        .pl_axis_tvalid  (ms_tx_tvalid[1]),
+        .pl_axis_tlast   (ms_tx_tlast[1]),
+        .pl_axis_tready  (ms_tx_tready[1]),
+        .mac_axis_tdata  (rtp1_eth_tdata),
+        .mac_axis_tvalid (rtp1_eth_tvalid),
+        .mac_axis_tlast  (rtp1_eth_tlast),
+        .mac_axis_tready (rtp1_eth_tready)
+    );
+
+    // ---- Merge per-stream RTP TX into a single line ----
+    wire [7:0] rtp_eth_tdata;
+    wire       rtp_eth_tvalid, rtp_eth_tlast, rtp_eth_tready;
+
+    tx_arbiter2 u_rtp_arb (
+        .clk            (clk125),
+        .rst            (rst),
+        .s0_axis_tdata  (rtp0_eth_tdata),
+        .s0_axis_tvalid (rtp0_eth_tvalid),
+        .s0_axis_tlast  (rtp0_eth_tlast),
+        .s0_axis_tready (rtp0_eth_tready),
+        .s1_axis_tdata  (rtp1_eth_tdata),
+        .s1_axis_tvalid (rtp1_eth_tvalid),
+        .s1_axis_tlast  (rtp1_eth_tlast),
+        .s1_axis_tready (rtp1_eth_tready),
+        .m_axis_tdata   (rtp_eth_tdata),
+        .m_axis_tvalid  (rtp_eth_tvalid),
+        .m_axis_tlast   (rtp_eth_tlast),
+        .m_axis_tready  (rtp_eth_tready)
     );
 
     // ---- Packet Router (RX classification) ----
@@ -563,10 +648,33 @@ module aes67_top (
     assign eth1_txd    = 4'h0;
     assign eth1_tx_en  = 1'b0;
 
-    // ---- MDIO (CPU-driven via separate peripheral; tied off here) ----
+    // ---- MDIO Master (Clause 22) ----
     assign eth_rst_n = pll_locked;
-    assign eth_mdc   = 1'b0;
-    assign eth_mdio  = 1'bz;
+
+    wire        mdio_oe, mdio_o, mdio_i;
+    wire        mdc_w;
+
+    mdio_master #(
+        .MDC_DIV(50)        // 1.25 MHz MDC at 125 MHz
+    ) u_mdio (
+        .clk             (clk125),
+        .rst             (rst),
+        .cmd_start       (mdio_cmd_start),
+        .cmd_op_read     (mdio_cmd_op_read),
+        .cmd_phy_addr    (mdio_cmd_phy_addr),
+        .cmd_reg_addr    (mdio_cmd_reg_addr),
+        .cmd_write_data  (mdio_cmd_write_data),
+        .read_data       (mdio_read_data),
+        .busy            (mdio_busy),
+        .mdc             (mdc_w),
+        .mdio_oe         (mdio_oe),
+        .mdio_o          (mdio_o),
+        .mdio_i          (mdio_i)
+    );
+
+    assign eth_mdc  = mdc_w;
+    assign eth_mdio = mdio_oe ? mdio_o : 1'bz;
+    assign mdio_i   = eth_mdio;
 
     // ---- Status LED ----
     reg [25:0] led_cnt;

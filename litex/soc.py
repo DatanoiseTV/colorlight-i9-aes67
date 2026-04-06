@@ -161,6 +161,9 @@ class AES67Engine(Module, AutoCSR):
 
         self.tx_ssrc            = CSRStorage(32, reset=0xDEADBEEF)
         self.rx_expected_ssrc   = CSRStorage(32, reset=0)
+        # Multi-stream RTP: stream 1 has its own SSRC pair
+        self.tx_ssrc_1          = CSRStorage(32, reset=0xCAFEBABE)
+        self.rx_expected_ssrc_1 = CSRStorage(32, reset=0)
         self.payload_type       = CSRStorage(7,  reset=98)
         self.num_channels       = CSRStorage(4,  reset=2)
         # Ultra-low-latency defaults: 6 samples = 125 µs @ 48 kHz
@@ -183,6 +186,20 @@ class AES67Engine(Module, AutoCSR):
         self.rtp_packets_tx     = CSRStatus(32)
         self.rtp_seq_errors     = CSRStatus(32)
         self.jbuf_depth         = CSRStatus(11)
+        # Stream 1 stats
+        self.rtp_packets_rx_1   = CSRStatus(32)
+        self.rtp_packets_tx_1   = CSRStatus(32)
+        self.rtp_seq_errors_1   = CSRStatus(32)
+        self.jbuf_depth_1       = CSRStatus(11)
+
+        # ---- MDIO Master CSRs ----
+        self.mdio_phy_addr  = CSRStorage(5)
+        self.mdio_reg_addr  = CSRStorage(5)
+        self.mdio_write_data= CSRStorage(16)
+        self.mdio_op_read   = CSRStorage(1, reset=1)
+        self.mdio_start     = CSR()
+        self.mdio_read_data = CSRStatus(16)
+        self.mdio_busy      = CSRStatus(1)
 
         # ---- Pins ----
         eth0 = platform.request("eth0_rgmii")
@@ -289,6 +306,8 @@ class AES67Engine(Module, AutoCSR):
             i_cfg_step_threshold_ns  = self.step_threshold_ns.storage,
             i_cfg_tx_ssrc            = self.tx_ssrc.storage,
             i_cfg_rx_expected_ssrc   = self.rx_expected_ssrc.storage,
+            i_cfg_tx_ssrc_1          = self.tx_ssrc_1.storage,
+            i_cfg_rx_expected_ssrc_1 = self.rx_expected_ssrc_1.storage,
             i_cfg_payload_type       = self.payload_type.storage,
             i_cfg_num_channels       = self.num_channels.storage,
             i_cfg_samples_per_pkt    = self.samples_per_packet.storage,
@@ -312,6 +331,19 @@ class AES67Engine(Module, AutoCSR):
             o_stat_rtp_packets_tx      = self.rtp_packets_tx.status,
             o_stat_rtp_seq_errors      = self.rtp_seq_errors.status,
             o_stat_jbuf_depth          = self.jbuf_depth.status,
+            o_stat_rtp_packets_rx_1    = self.rtp_packets_rx_1.status,
+            o_stat_rtp_packets_tx_1    = self.rtp_packets_tx_1.status,
+            o_stat_rtp_seq_errors_1    = self.rtp_seq_errors_1.status,
+            o_stat_jbuf_depth_1        = self.jbuf_depth_1.status,
+
+            # MDIO master
+            i_mdio_cmd_start      = self.mdio_start.re,
+            i_mdio_cmd_op_read    = self.mdio_op_read.storage,
+            i_mdio_cmd_phy_addr   = self.mdio_phy_addr.storage,
+            i_mdio_cmd_reg_addr   = self.mdio_reg_addr.storage,
+            i_mdio_cmd_write_data = self.mdio_write_data.storage,
+            o_mdio_read_data      = self.mdio_read_data.status,
+            o_mdio_busy           = self.mdio_busy.status,
 
             # CPU netif
             i_cpunet_rx_addr   = self.cpunet_rx_addr,
