@@ -144,16 +144,23 @@ class AES67Engine(Module, AutoCSR):
         self.rtp_mcast_ip       = CSRStorage(32, reset=0xEF45_0001)
         self.rtp_dst_mac        = CSRStorage(48, reset=0x0100_5E45_0001)
         self.rtp_port           = CSRStorage(16, reset=5004)
-        self.kp                 = CSRStorage(32, reset=0x00010000)
-        self.ki                 = CSRStorage(32, reset=0x00000100)
+        # PI gains: Kp=0.5, Ki=0.05 (Q16.16) - tuned for AES67 stability
+        self.kp                 = CSRStorage(32, reset=0x00008000)
+        self.ki                 = CSRStorage(32, reset=0x00000CCC)
         self.step_threshold_ns  = CSRStorage(32, reset=1000)
+        # Asymmetry compensation (RFC §7.4) and offset low-pass pole
+        self.tx_delay_ns        = CSRStorage(32, reset=0)
+        self.rx_delay_ns        = CSRStorage(32, reset=0)
+        self.filter_shift       = CSRStorage(4,  reset=4)  # ~16-sample TC
 
         self.tx_ssrc            = CSRStorage(32, reset=0xDEADBEEF)
         self.rx_expected_ssrc   = CSRStorage(32, reset=0)
         self.payload_type       = CSRStorage(7,  reset=98)
         self.num_channels       = CSRStorage(4,  reset=2)
-        self.samples_per_packet = CSRStorage(11, reset=48)
-        self.jbuf_target_depth  = CSRStorage(10, reset=192)
+        # Ultra-low-latency defaults: 6 samples = 125 µs @ 48 kHz
+        self.samples_per_packet = CSRStorage(11, reset=6)
+        # Jitter buffer: 24 frames = 500 µs @ 48 kHz
+        self.jbuf_target_depth  = CSRStorage(10, reset=24)
 
         self.nco_increment      = CSRStorage(32, reset=422_212_466)
         self.sample_rate        = CSRStorage(32, reset=48000)
@@ -263,6 +270,9 @@ class AES67Engine(Module, AutoCSR):
             i_cfg_samples_per_pkt    = self.samples_per_packet.storage,
             i_cfg_jbuf_target_depth  = self.jbuf_target_depth.storage,
             i_cfg_nco_increment      = self.nco_increment.storage,
+            i_cfg_tx_delay_ns        = self.tx_delay_ns.storage,
+            i_cfg_rx_delay_ns        = self.rx_delay_ns.storage,
+            i_cfg_filter_shift       = self.filter_shift.storage,
 
             # Status
             o_stat_ptp_sec             = self.ptp_sec.status,

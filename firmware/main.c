@@ -26,6 +26,7 @@
 #include "netif/ethernet.h"
 
 #include "litex_netif.h"
+#include "sap.h"
 
 extern void aes67_status_init(void);
 
@@ -37,18 +38,23 @@ static struct netif s_netif;
 // ---- AES67 hardware bring-up ----------------------------------------------
 static void aes67_configure_defaults(void)
 {
-    // Servo gains (Q16.16): Kp=1.0, Ki~=0.004
-    aes67_kp_write(0x00010000);
-    aes67_ki_write(0x00000100);
+    // Servo gains (Q16.16): Kp=0.5, Ki=0.05 - tuned for AES67 stability
+    aes67_kp_write(0x00008000);
+    aes67_ki_write(0x00000CCC);
     aes67_step_threshold_ns_write(1000);
 
-    // Default stream: stereo L24 @ 48 kHz, 1 ms packets
+    // Asymmetry compensation - measured per-board, default 0
+    aes67_tx_delay_ns_write(0);
+    aes67_rx_delay_ns_write(0);
+    aes67_filter_shift_write(4);   // ~16-sample LP filter
+
+    // Ultra-low-latency: stereo L24 @ 48 kHz, 125 µs packets, 500 µs jitter buffer
     aes67_tx_ssrc_write(0xDEADBEEF);
     aes67_rx_expected_ssrc_write(0);
     aes67_payload_type_write(98);
     aes67_num_channels_write(2);
-    aes67_samples_per_packet_write(48);
-    aes67_jbuf_target_depth_write(192);
+    aes67_samples_per_packet_write(6);    // 6 samples = 125 µs @ 48 kHz
+    aes67_jbuf_target_depth_write(24);    // 24 frames = 500 µs @ 48 kHz
 
     // Audio NCO for 48 kHz × 8 slot × 32 bit TDM (12.288 MHz BCLK)
     aes67_nco_increment_write(422212466);
@@ -162,12 +168,16 @@ int main(void)
     httpd_init();
     aes67_status_init();
 
+    // SAP / SDP session announcement (RFC 2974)
+    sap_init();
+
     printf("Services up. Entering main loop.\n");
 
-    // Main loop: poll netif, drive lwIP timers, print status
+    // Main loop: poll netif, drive lwIP timers, run SAP, print status
     while (1) {
         litex_netif_poll(&s_netif);
         sys_check_timeouts();
+        sap_poll();
         print_periodic_status();
     }
 

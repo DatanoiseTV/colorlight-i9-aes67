@@ -23,6 +23,7 @@ RTL_SRCS  = \
     rtl/util/crc32.v \
     rtl/util/fifo_sync.v \
     rtl/util/fifo_async.v \
+    rtl/util/reset_sync.v \
     rtl/eth/rgmii_rx.v \
     rtl/eth/rgmii_tx.v \
     rtl/eth/eth_mac_rx.v \
@@ -33,6 +34,7 @@ RTL_SRCS  = \
     rtl/eth/tx_arbiter.v \
     rtl/ptp/ptp_clock.v \
     rtl/ptp/ptp_timestamp.v \
+    rtl/ptp/ptp_filter.v \
     rtl/ptp/ptp_servo.v \
     rtl/ptp/ptp_pp.v \
     rtl/ptp/ptp_top.v \

@@ -70,6 +70,9 @@ module aes67_top (
     input  wire [10:0] cfg_samples_per_pkt,
     input  wire [9:0]  cfg_jbuf_target_depth,
     input  wire [31:0] cfg_nco_increment,
+    input  wire signed [31:0] cfg_tx_delay_ns,    // PHY/cable TX asymmetry
+    input  wire signed [31:0] cfg_rx_delay_ns,    // PHY/cable RX asymmetry
+    input  wire [3:0]  cfg_filter_shift,          // PTP offset LP filter pole
 
     // Status outputs
     output wire [47:0] stat_ptp_sec,
@@ -123,7 +126,13 @@ module aes67_top (
         .locked  (pll_locked)
     );
 
-    wire rst = ~pll_locked;
+    // Synchronous reset (async assert when PLL drops lock, sync release)
+    wire rst;
+    reset_sync u_rst_sync (
+        .clk         (clk125),
+        .async_rst_n (pll_locked),
+        .sync_rst    (rst)
+    );
 
     // ---- Ethernet MAC (PHY 0) ----
     wire [7:0] mac0_rx_tdata;
@@ -164,6 +173,9 @@ module aes67_top (
     wire [7:0] ptp_payload_tdata;
     wire       ptp_payload_tvalid, ptp_payload_tlast, ptp_payload_tready;
 
+    wire signed [31:0] ptp_freq_adj_ppb;
+    wire        ptp_freq_adj_valid;
+
     ptp_top u_ptp (
         .clk                    (clk125),
         .rst                    (rst),
@@ -171,6 +183,9 @@ module aes67_top (
         .kp                     (cfg_kp),
         .ki                     (cfg_ki),
         .step_threshold_ns      (cfg_step_threshold_ns),
+        .tx_delay_ns            (cfg_tx_delay_ns),
+        .rx_delay_ns            (cfg_rx_delay_ns),
+        .filter_shift           (cfg_filter_shift),
         .rx_axis_tdata          (ptp_rx_tdata),
         .rx_axis_tvalid         (ptp_rx_tvalid),
         .rx_axis_tlast          (ptp_rx_tlast),
@@ -184,6 +199,8 @@ module aes67_top (
         .ptp_sec                (stat_ptp_sec),
         .ptp_nsec               (stat_ptp_nsec),
         .pps                    (),
+        .freq_adj_ppb           (ptp_freq_adj_ppb),
+        .freq_adj_valid         (ptp_freq_adj_valid),
         .lock_state             (stat_ptp_lock_state),
         .offset_filtered_ns     (stat_ptp_offset_filt),
         .path_delay_filtered_ns (stat_ptp_path_delay_filt),
@@ -239,6 +256,8 @@ module aes67_top (
         .rst                (rst),
         .ptp_sec            (stat_ptp_sec),
         .ptp_nsec           (stat_ptp_nsec),
+        .freq_adj_ppb       (ptp_freq_adj_ppb),
+        .freq_adj_valid     (ptp_freq_adj_valid),
         .nco_increment      (cfg_nco_increment),
         .sample_rate        (32'd48000),
         .bclk               (bclk_int),

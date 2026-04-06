@@ -9,18 +9,53 @@ on the same physical Ethernet — without ever touching the RTP data path.
 
 | | |
 |---|---|
-| Hardware MAC | Custom 1 Gbps RGMII MAC with PTP SFD pulses |
-| PTP | Full IEEE 1588 in Verilog: clock, hardware timestamping, packet processor (Sync/FollowUp/DelayReq/DelayResp), PI servo, lock detector |
+| Hardware MAC | Custom 1 Gbps RGMII MAC with **byte-precise SFD pulses** for PTP timestamping |
+| PTP (RFC 1588-2008) | Full Verilog: clock NCO, **hardware timestamp capture with PHY/cable asymmetry compensation** (RFC §7.4), packet processor with **correctionField subtraction** (RFC §11.3), **second-rollover-correct offset math**, **twoStepFlag** awareness, low-pass filter, hysteretic PI servo, lock detector |
+| **Latency** | **125 µs** packet time, **500 µs** jitter buffer, **cut-through** packet router (~336 ns vs 12 µs store-and-forward), **PTP-disciplined** audio NCO |
 | RTP | Hardware TX + RX engines with L24 codec, BRAM jitter buffer |
-| Audio I/O | I2S **and TDM** master (up to 16 channels) clocked by a PTP-locked NCO |
+| Audio I/O | I2S **and TDM** master (up to 16 channels) clocked by a PTP-disciplined NCO |
 | TX path | IP/UDP/Ethernet wrappers for PTP and RTP, 3-way arbiter (PTP > RTP > CPU) |
 | Soft CPU | LiteX VexRiscv with 8 MB SDRAM, lwIP TCP/IP stack |
 | DHCP | Full lwIP DHCP client (DISCOVER/OFFER/REQUEST/ACK/RENEW) |
+| **SAP** (RFC 2974) | Multicast session announcement on `239.255.255.255:9875` with AES67-compliant SDP including `ts-refclk` and `mediaclk` attributes; remote source discovery cache |
 | mDNS | lwIP mdns_responder advertising `_ravenna._udp` and `_http._tcp` |
 | HTTP | lwIP httpd with `/status.cgi` JSON endpoint |
 | Virtual I2S | CPU-accessible audio FIFO that mixes into the RTP TX path or replaces channels |
 | PLL | Real ECP5 `EHXPLLL` (25 → 125 MHz @ 0° + 90°) |
+| Reset | Async-assert / sync-deassert reset synchronizer |
 | Toolchain | Reproducible Docker image with OSS CAD Suite + LiteX + lwIP + RV32 GCC |
+
+## Latency Budget (slave RX → DAC)
+
+| Stage | Time |
+|-------|------|
+| Wire → MAC SFD pulse (RGMII pipeline) | ~16 ns (compensated via `rx_delay_ns` CSR) |
+| Cut-through packet router (decision @ byte 38) | ~336 ns |
+| RTP RX parse + L24 decode + jitter buffer write | ~100 ns + (jitter buffer fill) |
+| Jitter buffer target depth (default) | **500 µs** |
+| BRAM read → I2S/TDM shift register | < 1 µs |
+| **Total slave RX latency** | **~500 µs** |
+
+For TX: audio frame tick → RTP TX engine → IP/UDP/Eth wrapper → MAC TX SFD ≈ 1.5 µs + frame transmit time.
+
+## RFC Compliance Notes
+
+The PTP implementation aims to be conformant with **IEEE 1588-2008** (PTPv2):
+
+- **§7.3.4 Timestamping**: timestamps are captured at the cycle the SFD crosses the MII boundary in the MAC clock domain — *not* after a synchronizer chain that would add jitter. The capture register is registered combinationally on the SFD pulse so there is no extra cycle.
+- **§7.4 Asymmetry compensation**: configurable `tx_delay_ns` and `rx_delay_ns` CSRs (signed nanoseconds) are added to/subtracted from the captured timestamps with correct second-rollover handling. Set these per-board to compensate for PHY + magnetics + cable asymmetry.
+- **§11.3 Offset / mean path delay**:
+  ```
+  m2s   = (t2 - t1) - corrField_sync          # corrField is ns << 16
+  s2m   = (t4 - t3) - corrField_resp
+  delay = (m2s + s2m) / 2
+  offset= m2s - delay
+  ```
+  All math is signed 64-bit and handles offsets that span seconds boundaries.
+- **§11.4.4 correctionField summation**: the receiver adds the Sync correctionField to the Follow_Up correctionField (two-step path), and uses the Sync's own field directly in one-step mode.
+- **`twoStepFlag` (octet 6 bit 1)**: detected per Sync; if cleared, the Sync's `originTimestamp` is used directly as t1, no Follow_Up wait.
+- **PI servo stability**: tuned gains (Kp=0.5, Ki=0.05 in Q16.16), anti-windup integrator clamp (±100 ms), output saturation (±500 ppm), hysteretic 3-state lock detector with separate enter/exit thresholds.
+- **Active discipline of audio clock**: the same `freq_adj_ppb` signal that adjusts the PTP clock NCO is also fed to the audio sample-rate NCO so the audio output remains locked to the grandmaster — not just synchronized at startup.
 
 ## Architecture
 
