@@ -22,6 +22,10 @@ on the same physical Ethernet — without ever touching the RTP data path.
 | mDNS | lwIP mdns_responder advertising `_ravenna._udp` and `_http._tcp` |
 | HTTP | lwIP httpd with `/status.cgi` JSON endpoint |
 | Virtual TDM-16 | CPU-accessible 16-channel audio FIFO that mixes into the RTP TX path or replaces channels |
+| **DSP slot** | Per-channel **gain / mute / peak meter** in hardware (combinational, Q1.15 gain), foundation for biquad EQ |
+| **WebUI** | Single-page dashboard at `http://aes67br-XXXXXX.local/` — live stats, full configuration editor, SAP discovery, BMC view, **per-channel DSP controls with peak meters**, and **live channel preview audio** |
+| **Audio preview** | `audio_capture` HW FIFO + `/audio.wav` HTTP streaming endpoint, playable in any browser via `<audio>` element |
+| **Hostname** | Auto-generated `aes67br-XXXXXX` from the lower 24 bits of the MAC, used for DHCP, mDNS, BMC clock identity, SAP origin |
 | PLL | Real ECP5 `EHXPLLL` (25 → 125 MHz @ 0° + 90°) |
 | Reset | Async-assert / sync-deassert reset synchronizer |
 | Toolchain | Reproducible Docker image with OSS CAD Suite + LiteX + lwIP + RV32 GCC |

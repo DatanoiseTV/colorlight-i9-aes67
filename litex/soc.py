@@ -219,6 +219,24 @@ class AES67Engine(Module, AutoCSR):
         self.virtaud_mix_enable = CSRStorage()
         self.virtaud_chan_mask  = CSRStorage(16)
 
+        # ---- DSP slot CSRs (per-channel gain/mute/meter) ----
+        self.dsp_cfg_ch_sel   = CSRStorage(4)
+        self.dsp_gain_val     = CSRStorage(16, reset=0x7FFF)
+        self.dsp_gain_we      = CSR()
+        self.dsp_mute_val     = CSRStorage(1)
+        self.dsp_mute_we      = CSR()
+        self.dsp_meter_ch_sel = CSRStorage(4)
+        self.dsp_meter_value  = CSRStatus(24)
+        self.dsp_meter_clear  = CSR()
+
+        # ---- Audio capture CSRs (browser preview FIFO) ----
+        self.audio_cap_chan_mask = CSRStorage(16)
+        self.audio_cap_enable    = CSRStorage(1)
+        self.audio_cap_rd        = CSR()
+        self.audio_cap_rd_data   = CSRStatus(20)
+        self.audio_cap_empty     = CSRStatus()
+        self.audio_cap_overflow  = CSRStatus()
+
         # ---- Add Verilog sources ----
         rtl_dir = os.path.join(os.path.dirname(__file__), "..", "rtl")
         for sub in ["util", "eth", "ptp", "rtp", "audio", "soc"]:
@@ -319,6 +337,24 @@ class AES67Engine(Module, AutoCSR):
             o_virtaud_rx_empty     = self.virtaud_rx_empty.status,
             i_virtaud_mix_enable   = self.virtaud_mix_enable.storage,
             i_virtaud_channel_mask = self.virtaud_chan_mask.storage,
+
+            # DSP slot
+            i_dsp_cfg_ch_sel    = self.dsp_cfg_ch_sel.storage,
+            i_dsp_gain_we       = self.dsp_gain_we.re,
+            i_dsp_gain_val      = self.dsp_gain_val.storage,
+            i_dsp_mute_we       = self.dsp_mute_we.re,
+            i_dsp_mute_val      = self.dsp_mute_val.storage,
+            i_dsp_meter_ch_sel  = self.dsp_meter_ch_sel.storage,
+            o_dsp_meter_value   = self.dsp_meter_value.status,
+            i_dsp_meter_clear   = self.dsp_meter_clear.re,
+
+            # Audio capture
+            i_cap_chan_mask = self.audio_cap_chan_mask.storage,
+            i_cap_enable    = self.audio_cap_enable.storage,
+            i_cap_rd        = self.audio_cap_rd.re,
+            o_cap_rd_data   = self.audio_cap_rd_data.status,
+            o_cap_empty     = self.audio_cap_empty.status,
+            o_cap_overflow  = self.audio_cap_overflow.status,
         )
 
 

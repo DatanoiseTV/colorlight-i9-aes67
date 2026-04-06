@@ -20,6 +20,7 @@
 // (slave) once the mode CSR is set.
 
 #include "ptp_bmc.h"
+#include "api.h"     // unit_clock_id()
 #include "lwip/udp.h"
 #include "lwip/igmp.h"
 #include "lwip/netif.h"
@@ -347,6 +348,9 @@ void ptp_bmc_init(void)
     s_last_announce_tx_ms = 0;
     s_last_bmc_tick_ms    = 0;
     s_seq_id              = 0;
+
+    // Use the unit-derived EUI-64 clock identity (from MAC)
+    unit_clock_id(s_local_clock_id);
 
     // Push the local clock identity into the hardware engine
     uint64_t cid64 = 0;

@@ -113,7 +113,25 @@ module aes67_top (
     output wire [3:0]  virtaud_rx_ch,
     output wire        virtaud_rx_empty,
     input  wire        virtaud_mix_enable,
-    input  wire [15:0] virtaud_channel_mask
+    input  wire [15:0] virtaud_channel_mask,
+
+    // ---- Audio DSP slot (per-channel gain/mute/meter) ----
+    input  wire [3:0]  dsp_cfg_ch_sel,
+    input  wire        dsp_gain_we,
+    input  wire [15:0] dsp_gain_val,
+    input  wire        dsp_mute_we,
+    input  wire        dsp_mute_val,
+    input  wire [3:0]  dsp_meter_ch_sel,
+    output wire [23:0] dsp_meter_value,
+    input  wire        dsp_meter_clear,
+
+    // ---- Audio capture FIFO (browser preview) ----
+    input  wire [15:0] cap_chan_mask,
+    input  wire        cap_enable,
+    input  wire        cap_rd,
+    output wire [19:0] cap_rd_data,
+    output wire        cap_empty,
+    output wire        cap_overflow
 );
 
     // ---- Clock generation ----
@@ -278,9 +296,49 @@ module aes67_top (
     // ---- I2S/TDM Master ----
     wire [3:0]  tdm_tx_slot, tdm_rx_slot;
     wire        tdm_tx_rd, tdm_rx_wr;
-    wire [23:0] tdm_tx_sample_raw;     // from RTP RX path (or virtaud)
-    wire [23:0] tdm_tx_sample_mixed;   // after virtual I2S mixing
+    wire [23:0] tdm_tx_sample_rtp;     // raw from RTP RX path
+    wire [23:0] tdm_tx_sample_dsp;     // after audio_dsp (gain/mute)
+    wire [23:0] tdm_tx_sample_mixed;   // after virt_tdm16 CPU mix
     wire [23:0] tdm_rx_sample;
+
+    // ---- Audio DSP slot (per-channel gain/mute/meter) ----
+    audio_dsp #(
+        .NUM_CHANNELS(16)
+    ) u_dsp (
+        .clk          (clk125),
+        .rst          (rst),
+        .cfg_ch_sel   (dsp_cfg_ch_sel),
+        .cfg_gain_we  (dsp_gain_we),
+        .cfg_gain_val (dsp_gain_val),
+        .cfg_mute_we  (dsp_mute_we),
+        .cfg_mute_val (dsp_mute_val),
+        .meter_ch_sel (dsp_meter_ch_sel),
+        .meter_value  (dsp_meter_value),
+        .meter_clear  (dsp_meter_clear),
+        .audio_ch     (tdm_tx_slot),
+        .audio_in     (tdm_tx_sample_rtp),
+        .audio_tick   (tdm_tx_rd),
+        .audio_out    (tdm_tx_sample_dsp)
+    );
+
+    // ---- Audio capture FIFO (browser preview) ----
+    audio_capture #(
+        .NUM_CHANNELS(16),
+        .FIFO_ADDR_W (10)
+    ) u_cap (
+        .clk          (clk125),
+        .rst          (rst),
+        .src_ch       (tdm_tx_slot),
+        .src_sample   (tdm_tx_sample_dsp),
+        .src_tick     (tdm_tx_rd),
+        .channel_mask (cap_chan_mask),
+        .enable       (cap_enable),
+        .cpu_rd       (cap_rd),
+        .cpu_rd_data  (cap_rd_data),
+        .cpu_empty    (cap_empty),
+        .cpu_level    (),
+        .cpu_overflow (cap_overflow)
+    );
 
     i2s_tdm_master #(
         .MAX_SLOTS   (8),
@@ -332,7 +390,7 @@ module aes67_top (
         .mix_enable       (virtaud_mix_enable),
         .cpu_channel_mask (virtaud_channel_mask),
         .audio_tx_ch      (tdm_tx_slot),
-        .audio_tx_in      (tdm_tx_sample_raw),
+        .audio_tx_in      (tdm_tx_sample_dsp),
         .audio_tx_out     (tdm_tx_sample_mixed),
         .audio_tx_tick    (tdm_tx_rd),
         .audio_rx_ch      (tdm_rx_slot),
@@ -371,7 +429,7 @@ module aes67_top (
         .tx_axis_tready       (rtp_payload_tready),
         .audio_rd_ch          (tdm_tx_slot),
         .audio_rd_en          (tdm_tx_rd),
-        .audio_rd_data        (tdm_tx_sample_raw),
+        .audio_rd_data        (tdm_tx_sample_rtp),
         .audio_wr_data        (tdm_rx_sample),
         .audio_wr_addr        ({7'd0, tdm_rx_slot}),
         .audio_wr_en          (tdm_rx_wr),

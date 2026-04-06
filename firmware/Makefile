@@ -17,7 +17,10 @@ APP_SRCS = \
     main.c \
     litex_netif.c \
     sys_now.c \
-    aes67_status.c \
+    httpd_lite.c \
+    api.c \
+    audio_stream.c \
+    web_index.c \
     sap.c \
     ptp_bmc.c
 
@@ -58,8 +61,6 @@ LWIP_NETIF_SRCS = \
     $(LWIP_DIR)/src/netif/ethernet.c
 
 LWIP_APPS_SRCS = \
-    $(LWIP_DIR)/src/apps/http/httpd.c \
-    $(LWIP_DIR)/src/apps/http/fs.c \
     $(LWIP_DIR)/src/apps/mdns/mdns.c \
     $(LWIP_DIR)/src/apps/mdns/mdns_domain.c \
     $(LWIP_DIR)/src/apps/mdns/mdns_out.c

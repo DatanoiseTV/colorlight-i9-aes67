@@ -21,17 +21,20 @@
 #include "lwip/timeouts.h"
 #include "lwip/dhcp.h"
 #include "lwip/ip4_addr.h"
-#include "lwip/apps/httpd.h"
 #include "lwip/apps/mdns.h"
 #include "netif/ethernet.h"
 
 #include "litex_netif.h"
 #include "sap.h"
 #include "ptp_bmc.h"
+#include "httpd_lite.h"
+#include "api.h"
+#include "audio_stream.h"
+#include "web_index.h"
 
-extern void aes67_status_init(void);
-
-// Default MAC (would normally be derived from a serial number / EFUSE)
+// Default locally-administered MAC. The lower 24 bits become the unit
+// serial and are used to derive the hostname (aes67br-XXXXXX) and the
+// EUI-64 PTP clock identity.
 static const uint8_t s_mac[6] = { 0x02, 0xAE, 0x67, 0x00, 0x00, 0x01 };
 
 static struct netif s_netif;
@@ -147,8 +150,11 @@ int main(void)
     netif_set_link_up(&s_netif);
     netif_set_up(&s_netif);
 
-    // Hostname for DHCP / mDNS
-    netif_set_hostname(&s_netif, "aes67");
+    // Generate hostname (aes67br-XXXXXX) and clock id from MAC
+    unit_hostname_init();
+    const char *hn = unit_hostname();
+    printf("Unit hostname: %s\n", hn);
+    netif_set_hostname(&s_netif, hn);
 
     // Start DHCP
     if (dhcp_start(&s_netif) != ERR_OK) {
@@ -159,15 +165,17 @@ int main(void)
 
     // mDNS responder
     mdns_resp_init();
-    mdns_resp_add_netif(&s_netif, "aes67");
-    mdns_resp_add_service(&s_netif, "aes67", "_ravenna._udp",
+    mdns_resp_add_netif(&s_netif, hn);
+    mdns_resp_add_service(&s_netif, hn, "_ravenna._udp",
                            DNSSD_PROTO_UDP, 5004, srv_txt, NULL);
-    mdns_resp_add_service(&s_netif, "aes67", "_http._tcp",
+    mdns_resp_add_service(&s_netif, hn, "_http._tcp",
                            DNSSD_PROTO_TCP, 80,   NULL,    NULL);
 
-    // HTTP server (also runs CGI for /status.cgi)
-    httpd_init();
-    aes67_status_init();
+    // HTTP server with REST API + WebUI + audio preview streaming
+    httpd_lite_init(80);
+    web_index_register();
+    api_register_routes();
+    audio_stream_register();
 
     // SAP / SDP session announcement (RFC 2974)
     sap_init();

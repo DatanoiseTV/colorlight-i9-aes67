@@ -23,6 +23,7 @@
 // E=encrypted, C=compressed.
 
 #include "sap.h"
+#include "api.h"     // unit_hostname()
 #include "lwip/udp.h"
 #include "lwip/igmp.h"
 #include "lwip/ip_addr.h"
@@ -80,7 +81,7 @@ static void sap_build_local_sdp(void)
     int n = snprintf(s_local_sdp, sizeof(s_local_sdp),
         "v=0\r\n"
         "o=- %u 0 IN IP4 %u.%u.%u.%u\r\n"
-        "s=AES67 Stream\r\n"
+        "s=%s\r\n"
         "c=IN IP4 %u.%u.%u.%u/64\r\n"
         "t=0 0\r\n"
         "a=clock-domain:PTPv2 0\r\n"
@@ -97,6 +98,7 @@ static void sap_build_local_sdp(void)
         (unsigned)((local_ip >> 16) & 0xFF),
         (unsigned)((local_ip >>  8) & 0xFF),
         (unsigned)( local_ip        & 0xFF),
+        unit_hostname(),
         (unsigned)((mcast_ip >> 24) & 0xFF),
         (unsigned)((mcast_ip >> 16) & 0xFF),
         (unsigned)((mcast_ip >>  8) & 0xFF),
