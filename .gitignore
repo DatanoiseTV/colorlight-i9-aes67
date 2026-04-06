@@ -1,0 +1,34 @@
+# Build artifacts
+build/
+litex/build/
+firmware/build/
+firmware/*.o
+firmware/*.elf
+firmware/*.bin
+firmware/*.map
+
+# Simulation outputs
+sim/*.vcd
+sim/tb_*
+!sim/tb_*.v
+
+# Bitstreams
+*.bit
+*.svf
+*.config
+*.json
+!docker-compose.json
+
+# Editor / OS junk
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/

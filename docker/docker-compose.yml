@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: MIT
+# Docker Compose for the AES67 FPGA toolchain.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml run --rm fpga
+#   docker compose -f docker/docker-compose.yml run --rm fpga make synth
+#   docker compose -f docker/docker-compose.yml run --rm fpga make litex
+#
+# To program a board attached over USB (Linux only):
+#   docker compose -f docker/docker-compose.yml run --rm --privileged fpga make program
+
+services:
+  fpga:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        OSS_CAD_SUITE_DATE: 2024-09-01
+    image: aes67-fpga:latest
+    container_name: aes67-fpga
+    working_dir: /work
+    volumes:
+      - ..:/work
+    environment:
+      - TERM=xterm-256color
+      - HOME=/home/dev
+    # USB passthrough for board programming (Linux):
+    # devices:
+    #   - /dev/bus/usb:/dev/bus/usb
+    # On macOS / Windows, attach the board to a Linux VM (e.g. with usbipd-win)
+    # and forward the USB device into the VM that runs Docker.
+    stdin_open: true
+    tty: true
+    command: /bin/bash

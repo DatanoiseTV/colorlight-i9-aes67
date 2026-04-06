@@ -1,0 +1,219 @@
+## Colorlight i9 v7.2 (LFE5U-45F-6BG381C) Pin Constraints
+## Reference: https://github.com/wuxx/Colorlight-FPGA-Projects/blob/master/colorlight_i9_v7.2.md
+
+## Clock
+LOCATE COMP "clk25" SITE "P3";
+IOBUF  PORT "clk25" IO_TYPE=LVCMOS33;
+FREQUENCY PORT "clk25" 25 MHZ;
+
+## LED
+LOCATE COMP "led" SITE "L2";
+IOBUF  PORT "led" IO_TYPE=LVCMOS33;
+
+## ---- Ethernet PHY 0 (U29, B50612D) - RGMII ----
+# TX
+LOCATE COMP "eth0_gtxclk" SITE "U19";
+LOCATE COMP "eth0_txd[0]" SITE "U20";
+LOCATE COMP "eth0_txd[1]" SITE "T19";
+LOCATE COMP "eth0_txd[2]" SITE "T20";
+LOCATE COMP "eth0_txd[3]" SITE "R20";
+LOCATE COMP "eth0_tx_en"  SITE "P19";
+# RX
+LOCATE COMP "eth0_rxc"    SITE "L19";
+LOCATE COMP "eth0_rxd[0]" SITE "P20";
+LOCATE COMP "eth0_rxd[1]" SITE "N19";
+LOCATE COMP "eth0_rxd[2]" SITE "N20";
+LOCATE COMP "eth0_rxd[3]" SITE "M19";
+LOCATE COMP "eth0_rx_dv"  SITE "M20";
+
+IOBUF PORT "eth0_gtxclk" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_txd[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_txd[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_txd[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_txd[3]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_tx_en"  IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_rxc"    IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_rxd[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_rxd[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_rxd[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_rxd[3]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth0_rx_dv"  IO_TYPE=LVCMOS33;
+
+## ---- Ethernet PHY 1 (U30, B50612D) - RGMII ----
+# TX
+LOCATE COMP "eth1_gtxclk" SITE "G1";
+LOCATE COMP "eth1_txd[0]" SITE "G2";
+LOCATE COMP "eth1_txd[1]" SITE "H1";
+LOCATE COMP "eth1_txd[2]" SITE "J1";
+LOCATE COMP "eth1_txd[3]" SITE "J3";
+LOCATE COMP "eth1_tx_en"  SITE "K1";
+# RX
+LOCATE COMP "eth1_rxc"    SITE "H2";
+LOCATE COMP "eth1_rxd[0]" SITE "K2";
+LOCATE COMP "eth1_rxd[1]" SITE "L1";
+LOCATE COMP "eth1_rxd[2]" SITE "N1";
+LOCATE COMP "eth1_rxd[3]" SITE "P1";
+LOCATE COMP "eth1_rx_dv"  SITE "P2";
+
+IOBUF PORT "eth1_gtxclk" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_txd[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_txd[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_txd[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_txd[3]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_tx_en"  IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_rxc"    IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_rxd[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_rxd[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_rxd[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_rxd[3]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth1_rx_dv"  IO_TYPE=LVCMOS33;
+
+## ---- Shared MDIO / PHY Reset ----
+LOCATE COMP "eth_mdio" SITE "N5";
+LOCATE COMP "eth_mdc"  SITE "P5";
+LOCATE COMP "eth_rst_n" SITE "P4";
+
+IOBUF PORT "eth_mdio"  IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_mdc"   IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rst_n" IO_TYPE=LVCMOS33;
+
+## ---- SDRAM (M12L64322A, 8MB, 32-bit) ----
+LOCATE COMP "sdram_clk"    SITE "B9";
+LOCATE COMP "sdram_cke"    SITE "B12";
+LOCATE COMP "sdram_cs_n"   SITE "B7";
+LOCATE COMP "sdram_ras_n"  SITE "B10";
+LOCATE COMP "sdram_cas_n"  SITE "A10";
+LOCATE COMP "sdram_we_n"   SITE "A9";
+LOCATE COMP "sdram_ba[0]"  SITE "B11";
+LOCATE COMP "sdram_ba[1]"  SITE "C8";
+LOCATE COMP "sdram_a[0]"   SITE "A7";
+LOCATE COMP "sdram_a[1]"   SITE "A6";
+LOCATE COMP "sdram_a[2]"   SITE "A5";
+LOCATE COMP "sdram_a[3]"   SITE "A4";
+LOCATE COMP "sdram_a[4]"   SITE "C7";
+LOCATE COMP "sdram_a[5]"   SITE "C6";
+LOCATE COMP "sdram_a[6]"   SITE "C5";
+LOCATE COMP "sdram_a[7]"   SITE "C4";
+LOCATE COMP "sdram_a[8]"   SITE "E7";
+LOCATE COMP "sdram_a[9]"   SITE "D6";
+LOCATE COMP "sdram_a[10]"  SITE "D5";
+LOCATE COMP "sdram_dqm[0]" SITE "A8";
+LOCATE COMP "sdram_dqm[1]" SITE "B8";
+LOCATE COMP "sdram_dqm[2]" SITE "E9";
+LOCATE COMP "sdram_dqm[3]" SITE "D9";
+LOCATE COMP "sdram_dq[0]"  SITE "C2";
+LOCATE COMP "sdram_dq[1]"  SITE "C1";
+LOCATE COMP "sdram_dq[2]"  SITE "D2";
+LOCATE COMP "sdram_dq[3]"  SITE "D1";
+LOCATE COMP "sdram_dq[4]"  SITE "E2";
+LOCATE COMP "sdram_dq[5]"  SITE "E1";
+LOCATE COMP "sdram_dq[6]"  SITE "F2";
+LOCATE COMP "sdram_dq[7]"  SITE "F1";
+LOCATE COMP "sdram_dq[8]"  SITE "G5";
+LOCATE COMP "sdram_dq[9]"  SITE "H4";
+LOCATE COMP "sdram_dq[10]" SITE "H5";
+LOCATE COMP "sdram_dq[11]" SITE "J4";
+LOCATE COMP "sdram_dq[12]" SITE "J5";
+LOCATE COMP "sdram_dq[13]" SITE "K4";
+LOCATE COMP "sdram_dq[14]" SITE "K5";
+LOCATE COMP "sdram_dq[15]" SITE "L4";
+LOCATE COMP "sdram_dq[16]" SITE "E11";
+LOCATE COMP "sdram_dq[17]" SITE "D11";
+LOCATE COMP "sdram_dq[18]" SITE "D12";
+LOCATE COMP "sdram_dq[19]" SITE "C12";
+LOCATE COMP "sdram_dq[20]" SITE "D13";
+LOCATE COMP "sdram_dq[21]" SITE "C13";
+LOCATE COMP "sdram_dq[22]" SITE "D14";
+LOCATE COMP "sdram_dq[23]" SITE "C14";
+LOCATE COMP "sdram_dq[24]" SITE "E14";
+LOCATE COMP "sdram_dq[25]" SITE "D15";
+LOCATE COMP "sdram_dq[26]" SITE "E15";
+LOCATE COMP "sdram_dq[27]" SITE "C15";
+LOCATE COMP "sdram_dq[28]" SITE "E16";
+LOCATE COMP "sdram_dq[29]" SITE "D16";
+LOCATE COMP "sdram_dq[30]" SITE "D17";
+LOCATE COMP "sdram_dq[31]" SITE "C17";
+
+IOBUF PORT "sdram_clk"    IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_cke"    IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_cs_n"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_ras_n"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_cas_n"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_we_n"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_ba[0]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_ba[1]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[0]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[1]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[2]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[3]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[4]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[5]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[6]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[7]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[8]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[9]"   IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_a[10]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dqm[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dqm[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dqm[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dqm[3]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[0]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[1]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[2]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[3]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[4]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[5]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[6]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[7]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[8]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[9]"  IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[10]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[11]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[12]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[13]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[14]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[15]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[16]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[17]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[18]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[19]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[20]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[21]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[22]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[23]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[24]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[25]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[26]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[27]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[28]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[29]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[30]" IO_TYPE=LVCMOS33;
+IOBUF PORT "sdram_dq[31]" IO_TYPE=LVCMOS33;
+
+## ---- I2S (directly on SODIMM GPIO pins) ----
+## SODIMM pin 41 = L2 (shared with LED on i9), use adjacent GPIOs
+## Using SODIMM pins 55-63 area for audio I/O
+## These assignments should be adjusted to match your ext-board wiring
+LOCATE COMP "i2s_mclk" SITE "F15";
+LOCATE COMP "i2s_bclk" SITE "E17";
+LOCATE COMP "i2s_lrck" SITE "F17";
+LOCATE COMP "i2s_dout" SITE "G18";
+LOCATE COMP "i2s_din"  SITE "H17";
+
+IOBUF PORT "i2s_mclk" IO_TYPE=LVCMOS33;
+IOBUF PORT "i2s_bclk" IO_TYPE=LVCMOS33;
+IOBUF PORT "i2s_lrck" IO_TYPE=LVCMOS33;
+IOBUF PORT "i2s_dout" IO_TYPE=LVCMOS33;
+IOBUF PORT "i2s_din"  IO_TYPE=LVCMOS33;
+
+## ---- SPI Flash (W25Q64JVSIQ, directly on PCB) ----
+## Used by FPGA for configuration; accessible after boot for firmware storage
+LOCATE COMP "flash_cs"   SITE "R2";
+LOCATE COMP "flash_miso" SITE "V2";
+LOCATE COMP "flash_mosi" SITE "W2";
+LOCATE COMP "flash_sck"  SITE "U3";
+
+IOBUF PORT "flash_cs"   IO_TYPE=LVCMOS33;
+IOBUF PORT "flash_miso" IO_TYPE=LVCMOS33;
+IOBUF PORT "flash_mosi" IO_TYPE=LVCMOS33;
+IOBUF PORT "flash_sck"  IO_TYPE=LVCMOS33;

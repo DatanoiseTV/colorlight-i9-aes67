@@ -1,0 +1,10 @@
+build/
+litex/build/
+sim/*.vcd
+sim/tb_*
+*.log
+*.bit
+*.svf
+*.config
+.git
+.vscode
